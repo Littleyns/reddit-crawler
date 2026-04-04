@@ -1,0 +1,34 @@
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID}
+      REDDIT_CLIENT_SECRET: ${REDDIT_CLIENT_SECRET}
+      REDDIT_USER_AGENT: ${REDDIT_USER_AGENT:-reddit-crawler/1.0}
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/reddit_crawler_integrated.db}
+    ports:
+      - "8000:8000"
+    volumes:
+      - reddit_crawler_data:/data
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api
+        API_PROXY_TARGET: http://backend:8000/api
+    environment:
+      NEXT_PUBLIC_API_URL: /api
+      API_PROXY_TARGET: http://backend:8000/api
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  reddit_crawler_data:
