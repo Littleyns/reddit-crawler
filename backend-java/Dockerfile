@@ -8,10 +8,10 @@ COPY pom.xml ./
 COPY src ./src
 COPY mvnw ./
 
-# Run Maven build with bash shell
+# Run Maven build with bash
 RUN apk add --no-cache bash curl && \
     chmod +x ./mvnw && \
-    ./mvnw clean package -DskipTests
+    bash ./mvnw clean package -DskipTests
 
 # Runtime stage
 FROM eclipse-temurin:21-jre-alpine
