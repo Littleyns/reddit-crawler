@@ -1,4 +1,8 @@
+.git
+.gitignore
 .next
-node_modules
-npm-debug.log
 coverage
+Dockerfile
+README.md
+npm-debug.log
+node_modules
