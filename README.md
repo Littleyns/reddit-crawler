@@ -1,36 +1,79 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Reddit Crawler
 
-## Getting Started
+A production-ready Reddit crawling and analytics platform built with **Java Spring Boot 3.x**, **PostgreSQL**, and a modern **Next.js 16** frontend.
 
-First, run the development server:
+## Overview
+
+- **Frontend**: Next.js 16 App Router dashboard for crawl control, telemetry, data browsing, exports, settings, and authentication
+- **Backend**: Java Spring Boot 3.2 REST API with JWT authentication, Spring Security, and full CRUD operations
+- **Database**: PostgreSQL 15 with Flyway versioned migrations
+- **Deployment**: Docker Compose with multi-stage builds, health checks, and production-ready configuration
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| **Frontend** | Next.js 16, React 19, TypeScript, TanStack Query, React Hook Form, Zod |
+| **Backend** | Java 21, Spring Boot 3.2, Spring Security, JWT |
+| **Database** | PostgreSQL 15, Flyway migrations, Spring Data JPA |
+| **ORM** | Hibernate, MapStruct |
+| **Security** | JWT tokens, BCrypt, Role-based access control |
+| **DevOps** | Docker Compose, Multi-stage builds, Maven |
+| **Docs** | Springdoc OpenAPI, Swagger UI |
+
+## Quick Start
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# Clone and setup
+git clone https://github.com/ArabTooling/reddit-crawler.git
+cd reddit-crawler/integrated-reddit-crawler
+
+# Copy environment files
+cp .env.example .env
+
+# Build and run
+docker compose up --build -d
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+**Access Points:**
+- Frontend: `http://localhost:3000`
+- API: `http://localhost:8080`
+- API Docs: `http://localhost:8080/swagger-ui.html`
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Features
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Crawler Control
+- Start/stop crawl sessions
+- Real-time status monitoring
+- Subreddit-specific crawling
+- Progress tracking
 
-## Learn More
+### Data Management
+- Browse scraped posts and comments
+- Full-text search
+- Pagination support
+- Export functionality
 
-To learn more about Next.js, take a look at the following resources:
+### Security
+- JWT authentication
+- Role-based access (ADMIN, OPERATOR, VIEWER)
+- Protected API endpoints
+- Secure password hashing
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## API Endpoints
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+See **Springdoc OpenAPI** at `http://localhost:8080/swagger-ui.html` for complete API documentation.
 
-## Deploy on Vercel
+**Key Endpoints:**
+- `POST /api/crawler/start` - Start crawl
+- `GET /api/data/posts` - List posts
+- `GET /api/data/comments` - List comments
+- `POST /api/auth/login` - Login
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Development
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See full documentation in the project README for detailed setup, environment configuration, deployment instructions, and development guides.
+
+---
+
+**Built with ❤️ by the ArabTooling team**
