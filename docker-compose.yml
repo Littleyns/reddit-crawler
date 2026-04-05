@@ -86,8 +86,6 @@ services:
       - API_PROXY_TARGET=http://api:8080/api
     ports:
       - "3000:3000"
-    depends_on:
-      - api
     restart: unless-stopped
     logging:
       driver: json-file
@@ -96,9 +94,6 @@ services:
         max-file: "3"
     networks:
       - reddit-network
-    profiles:
-      - all
-      - frontend
 
   frontend-proxy:
     image: nginx:alpine
@@ -124,6 +119,3 @@ volumes:
 networks:
   reddit-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.28.0.0/16
