@@ -31,8 +31,10 @@ public class PostsController {
             @Parameter(description = "Sort field") @RequestParam(defaultValue = "createdAt") String sort,
             @Parameter(description = "Sort direction") @RequestParam(defaultValue = "desc") String direction) {
         
-        Sort sortDirection = direction.equalsIgnoreCase("asc") ? Sort.Order.asc(sort) : Sort.Order.desc(sort);
-        Pageable pageable = PageRequest.of(page, size, sortDirection);
+        Sort.Direction sortDirection = direction.equalsIgnoreCase("asc")
+                ? Sort.Direction.ASC
+                : Sort.Direction.DESC;
+        Pageable pageable = PageRequest.of(page, size, Sort.by(sortDirection, sort));
         List<PostDTO> posts = postService.getAllPosts(pageable);
         return ResponseEntity.ok(posts);
     }
