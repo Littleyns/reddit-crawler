@@ -1,0 +1,28 @@
+# Maven and Spring Boot build outputs
+/target/
+/dependency-reduced-pom.xml
+
+# Logs and JVM crash dumps
+/logs/
+*.log
+hs_err_pid*
+replay_pid*
+
+# Local environment and secrets
+.env
+.env.local
+.env.*.local
+
+# IDE and editor files
+.classpath
+.project
+.settings/
+.factorypath
+.idea/
+.vscode/
+*.iml
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+Desktop.ini

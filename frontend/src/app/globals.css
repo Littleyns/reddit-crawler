@@ -1,73 +1,115 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-@layer base {
-  :root {
-    --background: 222 47% 11%;
-    --foreground: 210 40% 98%;
-    --card: 222 41% 14%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 41% 14%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222 47% 11%;
-    --secondary: 217 33% 20%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 18%;
-    --muted-foreground: 215 20% 71%;
-    --accent: 217 33% 22%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 63% 55%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 216 34% 24%;
-    --input: 216 34% 24%;
-    --ring: 213 27% 84%;
-    --chart-1: 213 94% 68%;
-    --chart-2: 173 58% 49%;
-    --chart-3: 38 92% 61%;
-    --chart-4: 262 83% 70%;
-    --chart-5: 343 82% 68%;
-    --radius: 1rem;
-  }
-
-  * {
-    @apply border-border;
-  }
-
-  html {
-    color-scheme: dark;
-  }
-
-  body {
-    @apply bg-background text-foreground antialiased;
-    font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
-    background-image:
-      radial-gradient(circle at top left, rgba(148, 163, 184, 0.18), transparent 30%),
-      radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 22%),
-      linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(2, 6, 23, 1) 100%);
-    min-height: 100vh;
-  }
-
-  a {
-    @apply text-inherit no-underline;
-  }
+:root {
+  --background: #f6f3ee;
+  --foreground: #16211d;
+  --muted: #5f6f69;
+  --page: #f6f3ee;
+  --surface: rgba(255, 255, 255, 0.74);
+  --surface-strong: #ffffff;
+  --surface-dark: #153126;
+  --border: rgba(22, 33, 29, 0.1);
+  --accent: #0e8f68;
+  --accent-strong: #0a6c4e;
+  --accent-soft: rgba(14, 143, 104, 0.12);
+  --warning: #ff9f43;
+  --danger: #d8584a;
+  --shadow: 0 20px 60px rgba(20, 34, 28, 0.12);
 }
 
-@layer components {
-  .surface {
-    @apply rounded-3xl border border-white/10 bg-card/80 shadow-panel backdrop-blur-xl;
-  }
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-page: var(--page);
+  --color-muted: var(--muted);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-surface-dark: var(--surface-dark);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --font-sans: "Avenir Next", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", monospace;
+}
 
-  .page-shell {
-    @apply mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8;
-  }
+* {
+  box-sizing: border-box;
+}
 
-  .page-copy {
-    @apply max-w-2xl text-sm text-slate-300;
-  }
+html {
+  scroll-behavior: smooth;
+}
 
-  .eyebrow {
-    @apply inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-300;
-  }
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  content: "";
+  background:
+    radial-gradient(circle at top left, rgba(14, 143, 104, 0.2), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(255, 159, 67, 0.16), transparent 28%),
+    linear-gradient(180deg, #faf8f4 0%, #f3efe6 100%);
+}
+
+body::after {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  content: "";
+  opacity: 0.35;
+  background-image:
+    linear-gradient(rgba(22, 33, 29, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(22, 33, 29, 0.03) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 85%);
+}
+
+a,
+button,
+input,
+select {
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+::selection {
+  color: white;
+  background: rgba(14, 143, 104, 0.75);
+}
+
+.panel {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(24px);
+}
+
+.panel-strong {
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+}
+
+.metric-glow {
+  background:
+    radial-gradient(circle at top right, rgba(14, 143, 104, 0.18), transparent 30%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.82));
+}
+
+.text-balance {
+  text-wrap: balance;
 }

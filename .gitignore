@@ -1,24 +1,8 @@
-# Dependencies
-node_modules/
-package-lock.json
-
-# Build outputs
-.next/
-out/
-
-# IDE
-.vscode/
-.idea/
-
-# OS
+# OS-specific files
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# Logs
-*.log
-npm-debug.log*
-
-# Environment
-.env
-.env.local
-.env.*.local
+# Editor directories
+.idea/
+.vscode/
