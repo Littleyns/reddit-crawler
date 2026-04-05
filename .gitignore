@@ -1,16 +1,8 @@
-.env
-.env.local
+# OS-specific files
 .DS_Store
+Thumbs.db
+Desktop.ini
 
-backend/__pycache__/
-**/__pycache__/
-**/*.pyc
-**/*.pyo
-backend/.pytest_cache/
-backend/*.db
-backend/data/
-
-frontend/.next/
-frontend/node_modules/
-frontend/test-results/
-frontend/coverage/
+# Editor directories
+.idea/
+.vscode/
