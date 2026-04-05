@@ -1,5 +1,6 @@
-# Maven Wrapper Script
 #!/bin/bash
+
+# Maven Wrapper Script
 
 # Maven 3.9.6
 MAVEN_VERSION="3.9.6"
