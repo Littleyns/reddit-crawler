@@ -11,11 +11,11 @@ ENV API_PROXY_TARGET=$API_PROXY_TARGET
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 # Copy package files
-COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm ci --frozen-lockfile
+COPY package.json package-lock.json ./
+RUN npm ci
 
 # Copy source code
-COPY frontend/ .
+COPY . .
 
 # Build the application
 ENV NEXT_TELEMETRY_DISABLED=1

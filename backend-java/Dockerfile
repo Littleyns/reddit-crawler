@@ -8,11 +8,11 @@ COPY pom.xml ./
 COPY src ./src
 COPY mvnw ./
 
-# Run Maven build with bash on Alpine and normalize CRLF from Windows checkouts
-RUN apk add --no-cache bash curl && \
+# Run Maven build after normalizing line endings from Windows checkouts.
+RUN apk add --no-cache curl && \
     sed -i 's/\r$//' ./mvnw && \
     chmod +x ./mvnw && \
-    bash ./mvnw clean package -DskipTests
+    ./mvnw clean package -DskipTests
 
 # Runtime stage
 FROM eclipse-temurin:21-jre-alpine
