@@ -8,7 +8,7 @@ COPY pom.xml ./
 COPY src ./src
 COPY mvnw ./
 
-# Run Maven build
+# Run Maven build with bash shell
 RUN apk add --no-cache bash curl && \
     chmod +x ./mvnw && \
     ./mvnw clean package -DskipTests
