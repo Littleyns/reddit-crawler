@@ -4,11 +4,9 @@ import com.arabtooling.redditcrawler.entity.ScrapingSession;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 import java.util.List;
-import java.util.Optional;
 
 @Repository
 public interface ScrapingSessionRepository extends JpaRepository<ScrapingSession, Long> {
     List<ScrapingSession> findBySubreddit(String subreddit);
     List<ScrapingSession> findByStatus(String status);
-    Optional<ScrapingSession> findByScrapingSessionId(Long sessionId);
 }

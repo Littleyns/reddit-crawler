@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import java.time.LocalDateTime;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 @Data
 @NoArgsConstructor
@@ -46,6 +47,11 @@ public class ScrapingSession {
 
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "creator_id")
+    @JsonIgnoreProperties("sessions")
+    private User creator;
 
     @OneToMany(mappedBy = "scrapingSession", cascade = CascadeType.ALL, orphanRemoval = true)
     private java.util.List<Post> posts = new java.util.ArrayList<>();

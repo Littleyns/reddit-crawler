@@ -52,8 +52,8 @@ public class CrawlerService {
             ScrapingSession session = sessionOpt.get();
             session.setStatus("cancelled");
             session.setFinishedAt(java.time.LocalDateTime.now());
-            saved = sessionRepository.save(session);
-            return sessionMapper.toDTO(saved);
+            session = sessionRepository.save(session);
+            return sessionMapper.toDTO(session);
         }
         throw new RuntimeException("Crawl session not found: " + sessionId);
     }

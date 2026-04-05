@@ -6,9 +6,10 @@ WORKDIR /build
 # Copy Maven project files
 COPY pom.xml ./
 COPY src ./src
+COPY mvnw ./
 
 # Run Maven build
-RUN apk add --no-cache bash && \
+RUN apk add --no-cache bash curl && \
     chmod +x ./mvnw && \
     ./mvnw clean package -DskipTests
 
