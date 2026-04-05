@@ -1,36 +1,41 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Reddit Crawler Frontend
 
-## Getting Started
+Internal control surface for ArabTooling's Reddit crawler. The frontend is built with Next.js, React Query, React Hook Form, Zod, and a local design-system layer tailored to operations tooling.
 
-First, run the development server:
+## Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Core quality checks:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run lint
+npm run test
+npm run build
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Routes
 
-## Learn More
+- `/dashboard` operational overview with live status cards
+- `/controls` crawler launch and runtime control panel
+- `/data` searchable export surface for posts and comments
+- `/settings` credentials, defaults, and operator management
+- `/design-system` component showcase and prop documentation
 
-To learn more about Next.js, take a look at the following resources:
+## Design System
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The component library is implemented directly in `src/components/ui` and used by the app screens.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `Button` supports `primary`, `secondary`, `ghost`, and `danger` variants
+- `Card` supports `default`, `elevated`, `outline`, and `spotlight` layouts
+- `Input`, `Textarea`, `Select`, and `CheckboxField` expose shared validation shells
+- `Dialog`, `Popover`, and `Tooltip` provide reusable overlay primitives
+- `DataTable` provides typed columns, client-side sorting, local filtering, and pagination controls
+- `component-docs.ts` stores prop metadata rendered on the showcase page
 
-## Deploy on Vercel
+Design tokens live in `src/app/globals.css` as CSS variables prefixed with `--ds-` for colors, surfaces, spacing, radii, and shadows.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Additional documentation: `docs/component-library.md`
