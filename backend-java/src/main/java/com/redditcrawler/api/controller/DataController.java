@@ -78,9 +78,10 @@ public class DataController {
 
         int total = filtered.size();
         int totalPages = Math.max(1, (total + pageSize - 1) / pageSize);
-        int fromIndex = Math.min((page - 1) * pageSize, total);
+        int clampedPage = Math.max(page, 1);
+        int fromIndex = Math.min((clampedPage - 1) * pageSize, total);
         int toIndex = Math.min(fromIndex + pageSize, total);
-        List<PostDTO> pageSlice = fromIndex < total ? filtered.subList(fromIndex, toIndex) : List.of();
+        List<PostDTO> pageSlice = fromIndex < total ? filtered.subList(Math.max(fromIndex, 0), toIndex) : List.of();
 
         AtomicInteger idSeq = new AtomicInteger(0);
         List<Map<String, Object>> items = pageSlice.stream().map(p -> {
@@ -169,9 +170,10 @@ public class DataController {
 
         int total = filtered.size();
         int totalPages = Math.max(1, (total + pageSize - 1) / pageSize);
-        int fromIndex = Math.min((page - 1) * pageSize, total);
+        int clampedPage = Math.max(page, 1);
+        int fromIndex = Math.min((clampedPage - 1) * pageSize, total);
         int toIndex = Math.min(fromIndex + pageSize, total);
-        List<Map<String, Object>> pageSlice = fromIndex < total ? filtered.subList(fromIndex, toIndex) : List.of();
+        List<Map<String, Object>> pageSlice = fromIndex < total ? filtered.subList(Math.max(fromIndex, 0), toIndex) : List.of();
 
         AtomicInteger idSeq = new AtomicInteger(0);
         List<Map<String, Object>> items = pageSlice.stream().map(c -> {

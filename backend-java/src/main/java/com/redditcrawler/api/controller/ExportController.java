@@ -41,7 +41,7 @@ public class ExportController {
         if ("json".equalsIgnoreCase(format)) {
             String jsonBody;
             try {
-                jsonBody = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(items);
+                jsonBody = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(Map.of("items", items, "format", "json"));
             } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
                 return ResponseEntity.internalServerError().body("{\"error\":\"serialization failed\"}");
             }
