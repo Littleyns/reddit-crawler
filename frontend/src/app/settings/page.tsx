@@ -10,6 +10,8 @@ import { ApiKeyInput } from "@/components/api-key-input";
 import { AuthForm } from "@/components/auth-form";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useSaveSettings, useSettings } from "@/hooks/use-reddit-crawler";
+
+import { LLMConfigPanel } from "@/components/llm/llm-config-panel";
 import type { UserSummary, SettingsPayload } from "@/lib/types";
 
 const formSchema = z.object({
@@ -94,7 +96,7 @@ export default function SettingsPage() {
             {/* API Key */}
             <label className="flex flex-col gap-1">
               <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Reddit API Key</span>
-              <ApiKeyInput value={apiKey ?? ""} onChange={(val) => form.setValue("apiKey", val as any)} />
+              <ApiKeyInput value={apiKey ?? ""} onChange={(val) => form.setValue("apiKey", val as any)} provider="" />
               {form.formState.errors.apiKey && (
                 <span className="text-[9px] text-[var(--color-danger-text)]">{form.formState.errors.apiKey.message}</span>
               )}
