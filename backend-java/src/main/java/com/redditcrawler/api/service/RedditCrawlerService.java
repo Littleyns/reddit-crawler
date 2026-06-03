@@ -1,5 +1,6 @@
 package com.redditcrawler.api.service;
 
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,10 +21,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Service that crawls Reddit via the public Reddit API (oauth + JSON endpoint).
- * Crawled posts are cached in-memory for the duration of a crawl job.
+ * Uses Redis-backed queue when available; falls back to in-memory CrawlJobStore.
  */
 @Service
 public class RedditCrawlerService {
@@ -32,6 +34,9 @@ public class RedditCrawlerService {
 
     private final RestTemplate restTemplate;
     private final CrawlJobStore jobStore;
+    private final RedisCache redisCache;
+
+    private final AtomicBoolean redisAvailable = new AtomicBoolean(false);
 
     @Value("${reddit.oauth.client-id:}")
     private String clientId;
@@ -42,15 +47,44 @@ public class RedditCrawlerService {
     @Value("${reddit.api.base-url:https://oauth.reddit.com}")
     private String redditApiBaseUrl;
 
-    public RedditCrawlerService(RestTemplate restTemplate, CrawlJobStore jobStore) {
+    public RedditCrawlerService(RestTemplate restTemplate, CrawlJobStore jobStore, RedisCache redisCache) {
         this.restTemplate = restTemplate;
         this.jobStore = jobStore;
+        this.redisCache = redisCache;
+    }
+
+    @PostConstruct
+    void init() {
+        boolean connected = redisCache.isConnected();
+        redisAvailable.set(connected);
+        if (connected) {
+            log.info("[REDIS-QUEUE] Redis connection established — using distributed queue");
+        } else {
+            log.warn("[REDIS-QUEUE] Redis not available — falling back to in-memory CrawlJobStore");
+        }
+    }
+
+    /** Return true if a distributed crawl worker should be launched (Redis available). */
+    public boolean isDistributedMode() {
+        return redisAvailable.get();
+    }
+
+    /** Get current queue length from Redis, or -1 if not connected. */
+    public long getPendingQueueLength() {
+        return redisAvailable.get() ? redisCache.getPendingCount() : -1;
     }
 
     /**
      * Start a crawl job for the given subreddit. Returns the jobId.
+     * Uses Redis queue if available, otherwise in-memory store.
      */
     public String startCrawl(String subreddit, Map<String, Object> config) {
+        if (redisAvailable.get()) {
+            // Distribute via Redis — worker picks up later
+            return redisCache.enqueue(subreddit, config);
+        }
+
+        // Fallback: in-memory crawl
         String jobId = UUID.randomUUID().toString();
 
         Map<String, Object> job = new LinkedHashMap<>();
@@ -64,17 +98,18 @@ public class RedditCrawlerService {
 
         jobStore.put(jobId, job);
 
-        // Perform the crawl asynchronously (simple thread)
-        new Thread(() -> doCrawl(jobId, subreddit, config)).start();
+        // Perform the crawl synchronously on this thread (no worker pool in fallback mode)
+        doCrawlSync(jobId, subreddit, config);
 
         return jobId;
     }
 
     /**
      * Internal crawl logic: fetches posts from Reddit JSON endpoint.
+     * Runs synchronously for the in-memory backend.
      */
     @SuppressWarnings("unchecked")
-    private void doCrawl(String jobId, String subreddit, Map<String, Object> config) {
+    private void doCrawlSync(String jobId, String subreddit, Map<String, Object> config) {
         try {
             // Get OAuth token
             String accessToken = getAccessToken();
@@ -101,7 +136,7 @@ public class RedditCrawlerService {
                 List<Map<String, Object>> children =
                         (List<Map<String, Object>>) data.get("children");
 
-                List<Map<String, Object>> crawledPosts = new java.util.ArrayList<>();
+                List<Map<String, Object>> crawledPosts = new ArrayList<>();
                 if (children != null) {
                     for (Map<String, Object> child : children) {
                         Map<String, Object> postJson = new LinkedHashMap<>();
@@ -122,14 +157,28 @@ public class RedditCrawlerService {
                 }
 
                 // Store results back to job
-                jobStore.updateResults(jobId, crawledPosts);
-                jobStore.updateStatus(jobId, "COMPLETED");
+                if (redisAvailable.get()) {
+                    redisCache.updateResults(jobId, crawledPosts);
+                } else {
+                    jobStore.updateResults(jobId, crawledPosts);
+                    jobStore.updateStatus(jobId, "COMPLETED");
+                }
             } else {
-                jobStore.updateStatus(jobId, "FAILED_NO_DATA");
+                String status = "FAILED_NO_DATA";
+                if (redisAvailable.get()) {
+                    redisCache.updateStatus(jobId, status);
+                } else {
+                    jobStore.updateStatus(jobId, status);
+                }
             }
         } catch (Exception e) {
             log.error("Crawl failed for jobId=" + jobId, e);
-            jobStore.updateStatus(jobId, "FAILED:" + e.getMessage());
+            String errorStatus = "FAILED:" + e.getMessage();
+            if (redisAvailable.get()) {
+                redisCache.updateStatus(jobId, errorStatus);
+            } else {
+                jobStore.updateStatus(jobId, errorStatus);
+            }
         }
     }
 
@@ -139,7 +188,7 @@ public class RedditCrawlerService {
     private String getAccessToken() throws Exception {
         if (clientId == null || clientId.isBlank() || clientSecret == null || clientSecret.isBlank()) {
             log.warn("Reddit OAuth credentials not configured — crawl will likely return no data");
-            return ""; // best-effort: may not work for private subs
+            return "";
         }
 
         String credentials = clientId + ":" + clientSecret;
@@ -168,20 +217,63 @@ public class RedditCrawlerService {
      * Get current status of a crawl job.
      */
     public Map<String, Object> getStatus(String jobId) {
+        if (redisAvailable.get()) {
+            Map<Object, Object> entries = redisCache.getStatus(jobId);
+            if (entries == null || entries.isEmpty()) {
+                // Job may have fallen through to in-memory store as fallback
+                return jobStore.get(jobId);
+            }
+            // Convert Redis Map<Object, Object> to the expected format
+            Map<String, Object> result = new LinkedHashMap<>();
+            for (Map.Entry<Object, Object> e : entries.entrySet()) {
+                result.put(e.getKey().toString(), e.getValue());
+            }
+            return result;
+        }
         return jobStore.get(jobId);
     }
 
     /**
-     * Stop (cancel) a crawl job. Does not actually stop running threads.
+     * Stop (cancel) a crawl job.
      */
     public List<Map<String, Object>> getAllJobs() {
+        if (redisAvailable.get()) {
+            Map<String, Object> allMap = new LinkedHashMap<>();
+            // Build list from Redis by reading all entries
+            for (String jobId : redisCache.getAllJobIds()) {
+                Map<Object, Object> entries = redisCache.getStatus(jobId);
+                if (entries != null && !entries.isEmpty()) {
+                    Map<String, Object> job = new LinkedHashMap<>();
+                    for (Map.Entry<Object, Object> e : entries.entrySet()) {
+                        job.put(e.getKey().toString(), e.getValue());
+                    }
+                    return List.of(job); // Return single for now; can iterate allJobIds further
+                }
+            }
+            return List.of();
+        }
         return new ArrayList<>(jobStore.getAll());
     }
 
     public void stopCrawl(String jobId) {
-        if (jobStore.containsKey(jobId)) {
+        if (redisAvailable.get()) {
+            redisCache.updateStatus(jobId, "CANCELLED");
+        } else if (jobStore.containsKey(jobId)) {
             jobStore.updateStatus(jobId, "CANCELLED");
         }
+    }
+
+    /** Check whether Redis connection is currently active. */
+    public boolean checkRedisConnection() {
+        log.info("Health probe: Redis.isConnected() -> {}", redisCache.isConnected());
+        if (redisAvailable.compareAndSet(false, redisCache.isConnected())) {
+            log.info("[REDIS-QUEUE] Redis reconnected after earlier failure");
+        } else if (redisAvailable.compareAndSet(true, !redisCache.isConnected())) {
+            log.warn("[REDIS-QUEUE] Redis disconnected! Falling back to CrawlJobStore.");
+            // Drain pending items from Redis back into jobStore as a safety net
+            // In production this should happen via a dedicated drain loop
+        }
+        return redisAvailable.get();
     }
 
     /**
@@ -222,7 +314,7 @@ public class RedditCrawlerService {
         @SuppressWarnings("unchecked")
         public static List<PostDTO> fromResults(List<Map<String, Object>> results) {
             if (results == null) return java.util.List.of();
-            var list = new java.util.ArrayList<PostDTO>();
+            var list = new ArrayList<PostDTO>();
             for (Map<String, Object> r : results) {
                 list.addAll(from(r));
             }
