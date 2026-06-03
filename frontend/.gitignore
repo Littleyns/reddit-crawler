@@ -8,7 +8,7 @@
 !.yarn/releases
 !.yarn/versions
 
-package-lock.json
+#!package-lock.json
 
 # Framework and build outputs
 /.next/
