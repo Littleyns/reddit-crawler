@@ -22,9 +22,22 @@ import type {
   CrawlerStatus,
 } from "@/lib/types";
 
+// Read stored token — mirrors localStorage.getItem("token").
+export function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("token");
+}
+
 export const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "/api",
   withCredentials: true,
+});
+
+// Attach Bearer token to every request when available.
+api.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) config.headers.set("Authorization", `Bearer ${token}`);
+  return config;
 });
 
 api.interceptors.response.use(

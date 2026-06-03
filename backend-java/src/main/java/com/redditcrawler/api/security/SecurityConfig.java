@@ -32,6 +32,13 @@ public class SecurityConfig {
         "/api/score"
     };
 
+    // Auth endpoints never require prior authentication — you must be able to log in without being logged in.
+    private static final String[] PUBLIC_AUTH_ENDPOINTS = {
+        "/api/auth/login",
+        "/api/auth/register",
+        "/api/auth/verify"
+    };
+
     private final JwtAuthFilter jwtAuthFilter;
 
     public SecurityConfig(JwtAuthFilter jwtAuthFilter) {
@@ -49,7 +56,9 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, PUBLIC_GET_ENDPOINTS).permitAll()
                 // Public API read endpoints
                 .requestMatchers(HttpMethod.GET, PUBLIC_API_GET).permitAll()
-                // All POST/PUT/DELETE require authentication
+                // Auth endpoints (login/register/verify) — never require prior authentication
+                .requestMatchers("/api/auth/**").permitAll()
+                // All other POST/PUT/DELETE require authentication
                 .requestMatchers(HttpMethod.POST, "/api/**").authenticated()
                 .requestMatchers(HttpMethod.PUT, "/api/**").authenticated()
                 .requestMatchers(HttpMethod.DELETE, "/api/**").authenticated()

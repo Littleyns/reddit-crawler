@@ -13,7 +13,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -64,29 +63,24 @@ public class RedditCrawlerService {
         }
     }
 
-    /** Return true if a distributed crawl worker should be launched (Redis available). */
     public boolean isDistributedMode() {
         return redisAvailable.get();
     }
 
-    /** Get current queue length from Redis, or -1 if not connected. */
     public long getPendingQueueLength() {
         return redisAvailable.get() ? redisCache.getPendingCount() : -1;
     }
 
     /**
      * Start a crawl job for the given subreddit. Returns the jobId.
-     * Uses Redis queue if available, otherwise in-memory store.
      */
     public String startCrawl(String subreddit, Map<String, Object> config) {
         if (redisAvailable.get()) {
-            // Distribute via Redis — worker picks up later
             return redisCache.enqueue(subreddit, config);
         }
 
         // Fallback: in-memory crawl
         String jobId = UUID.randomUUID().toString();
-
         Map<String, Object> job = new LinkedHashMap<>();
         job.put("jobId", jobId);
         job.put("subreddit", subreddit);
@@ -97,30 +91,20 @@ public class RedditCrawlerService {
         job.put("completedAt", null);
 
         jobStore.put(jobId, job);
-
-        // Perform the crawl synchronously on this thread (no worker pool in fallback mode)
         doCrawlSync(jobId, subreddit, config);
-
         return jobId;
     }
 
-    /**
-     * Internal crawl logic: fetches posts from Reddit JSON endpoint.
-     * Runs synchronously for the in-memory backend.
-     */
     @SuppressWarnings("unchecked")
     private void doCrawlSync(String jobId, String subreddit, Map<String, Object> config) {
         try {
-            // Get OAuth token
             String accessToken = getAccessToken();
-
-            // Construct the /r/{sub}/hot.json or similar URL
             int limit = 25;
-            if (config != null && config.get("limit") instanceof Integer) {
-                limit = (Integer) config.get("limit");
+            if (config != null && config.get("limit") instanceof Integer i) {
+                limit = Math.min(i, 100);
             }
 
-            String url = redditApiBaseUrl + "/r/" + subreddit + "/hot.json?limit=" + Math.min(limit, 100);
+            String url = redditApiBaseUrl + "/r/" + subreddit + "/hot.json?limit=" + limit;
 
             HttpHeaders headers = new HttpHeaders();
             headers.set("Authorization", "Bearer " + accessToken);
@@ -146,9 +130,10 @@ public class RedditCrawlerService {
                         postJson.put("title", d.getOrDefault("title", ""));
                         postJson.put("body", cleanBody(d.getOrDefault("selftext", "").toString()));
                         postJson.put("author", d.getOrDefault("author", "[deleted]"));
-                        postJson.put("upvotes", d.getOrDefault("ups", 0));
+                        Object ups = d.getOrDefault("ups", 0);
+                        postJson.put("upvotes", ups instanceof Number n ? n.intValue() : 0);
                         postJson.put("commentsCount", d.getOrDefault("num_comments", 0));
-                        postJson.put("createdUtc", Math.toIntExact((long) (Double.parseDouble(d.getOrDefault("created_utc", "0").toString()))));
+                        postJson.put("createdUtc", (int) Math.toIntExact((long) Double.parseDouble(d.getOrDefault("created_utc", "0").toString())));
                         postJson.put("permalink", permalink);
                         postJson.put("subreddit", subreddit);
 
@@ -156,7 +141,6 @@ public class RedditCrawlerService {
                     }
                 }
 
-                // Store results back to job
                 if (redisAvailable.get()) {
                     redisCache.updateResults(jobId, crawledPosts);
                 } else {
@@ -173,27 +157,23 @@ public class RedditCrawlerService {
             }
         } catch (Exception e) {
             log.error("Crawl failed for jobId=" + jobId, e);
-            String errorStatus = "FAILED:" + e.getMessage();
+            String error = "FAILED:" + e.getMessage();
             if (redisAvailable.get()) {
-                redisCache.updateStatus(jobId, errorStatus);
+                redisCache.updateStatus(jobId, error);
             } else {
-                jobStore.updateStatus(jobId, errorStatus);
+                jobStore.updateStatus(jobId, error);
             }
         }
     }
 
-    /**
-     * Obtain a Bearer access token from Reddit OAuth endpoint.
-     */
     private String getAccessToken() throws Exception {
         if (clientId == null || clientId.isBlank() || clientSecret == null || clientSecret.isBlank()) {
-            log.warn("Reddit OAuth credentials not configured — crawl will likely return no data");
+            log.warn("Reddit OAuth credentials not configured — crawl will return no data");
             return "";
         }
 
-        String credentials = clientId + ":" + clientSecret;
-        String encoded = Base64.getEncoder()
-                .encodeToString(credentials.getBytes(StandardCharsets.ISO_8859_1));
+        String cred = clientId + ":" + clientSecret;
+        String encoded = Base64.getEncoder().encodeToString(cred.getBytes(StandardCharsets.ISO_8859_1));
 
         HttpHeaders headers = new HttpHeaders();
         headers.set("Authorization", "Basic " + encoded);
@@ -204,8 +184,7 @@ public class RedditCrawlerService {
         HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, headers);
 
         ResponseEntity<Map> resp = restTemplate.exchange(
-                "https://www.reddit.com/api/v1/access_token",
-                HttpMethod.POST, entity, Map.class);
+                "https://www.reddit.com/api/v1/access_token", HttpMethod.POST, entity, Map.class);
 
         if (resp.getBody() == null) {
             throw new RuntimeException("Reddit OAuth returned empty response");
@@ -213,19 +192,14 @@ public class RedditCrawlerService {
         return (String) resp.getBody().get("access_token");
     }
 
-    /**
-     * Get current status of a crawl job.
-     */
     public Map<String, Object> getStatus(String jobId) {
         if (redisAvailable.get()) {
             Map<Object, Object> entries = redisCache.getStatus(jobId);
             if (entries == null || entries.isEmpty()) {
-                // Job may have fallen through to in-memory store as fallback
                 return jobStore.get(jobId);
             }
-            // Convert Redis Map<Object, Object> to the expected format
-            Map<String, Object> result = new LinkedHashMap<>();
-            for (Map.Entry<Object, Object> e : entries.entrySet()) {
+            var result = new LinkedHashMap<String, Object>();
+            for (var e : entries.entrySet()) {
                 result.put(e.getKey().toString(), e.getValue());
             }
             return result;
@@ -233,24 +207,20 @@ public class RedditCrawlerService {
         return jobStore.get(jobId);
     }
 
-    /**
-     * Stop (cancel) a crawl job.
-     */
     public List<Map<String, Object>> getAllJobs() {
         if (redisAvailable.get()) {
-            Map<String, Object> allMap = new LinkedHashMap<>();
-            // Build list from Redis by reading all entries
+            var jobs = new ArrayList<Map<String, Object>>();
             for (String jobId : redisCache.getAllJobIds()) {
                 Map<Object, Object> entries = redisCache.getStatus(jobId);
                 if (entries != null && !entries.isEmpty()) {
                     Map<String, Object> job = new LinkedHashMap<>();
-                    for (Map.Entry<Object, Object> e : entries.entrySet()) {
+                    for (var e : entries.entrySet()) {
                         job.put(e.getKey().toString(), e.getValue());
                     }
-                    return List.of(job); // Return single for now; can iterate allJobIds further
+                    jobs.add(job);
                 }
             }
-            return List.of();
+            return jobs;
         }
         return new ArrayList<>(jobStore.getAll());
     }
@@ -263,22 +233,6 @@ public class RedditCrawlerService {
         }
     }
 
-    /** Check whether Redis connection is currently active. */
-    public boolean checkRedisConnection() {
-        log.info("Health probe: Redis.isConnected() -> {}", redisCache.isConnected());
-        if (redisAvailable.compareAndSet(false, redisCache.isConnected())) {
-            log.info("[REDIS-QUEUE] Redis reconnected after earlier failure");
-        } else if (redisAvailable.compareAndSet(true, !redisCache.isConnected())) {
-            log.warn("[REDIS-QUEUE] Redis disconnected! Falling back to CrawlJobStore.");
-            // Drain pending items from Redis back into jobStore as a safety net
-            // In production this should happen via a dedicated drain loop
-        }
-        return redisAvailable.get();
-    }
-
-    /**
-     * Clean up post body (remove excessive whitespace).
-     */
     private String cleanBody(String text) {
         if (text == null || text.isEmpty()) return "";
         return text.replaceAll("\\s+", " ").trim();
@@ -305,7 +259,7 @@ public class RedditCrawlerService {
                 dto.commentsCount = 0;
             }
             dto.createdUtc = Instant.ofEpochSecond(
-                    (long) Double.parseDouble(postJson.getOrDefault("createdUtc", "0").toString()));
+                    Math.toIntExact((int) Double.parseDouble(postJson.getOrDefault("createdUtc", "0").toString())));
             dto.permalink = (String) postJson.getOrDefault("permalink", "");
             dto.subreddit = (String) postJson.getOrDefault("subreddit", "");
             return java.util.List.of(dto);
