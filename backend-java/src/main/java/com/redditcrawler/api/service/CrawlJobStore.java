@@ -55,4 +55,12 @@ public class CrawlJobStore {
     public int size() {
         return jobs.size();
     }
+
+    /** Store crawl comments (a separate flat list keyed by jobId). */
+    public void updateComments(String jobId, List<Map<String, Object>> comments) {
+        Map<String, Object> job = jobs.get(jobId);
+        if (job != null) {
+            job.put("commentsJson", (Object) comments);
+        }
+    }
 }

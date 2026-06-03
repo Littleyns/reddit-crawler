@@ -121,6 +121,10 @@ public class RedditCrawlerService {
                         (List<Map<String, Object>>) data.get("children");
 
                 List<Map<String, Object>> crawledPosts = new ArrayList<>();
+                // Also collect all comments flat across the whole result set.
+                List<Map<String, Object>> allComments = new ArrayList<>();
+                String commentBase = null;
+
                 if (children != null) {
                     for (Map<String, Object> child : children) {
                         Map<String, Object> postJson = new LinkedHashMap<>();
@@ -138,7 +142,34 @@ public class RedditCrawlerService {
                         postJson.put("subreddit", subreddit);
 
                         crawledPosts.add(postJson);
+
+                        // Collect comment base URL from first child (or construct it).
+                        if (d.get("name") != null) {
+                            commentBase = String.valueOf(d.get("name"));
+                        }
+
+                        // Recurse into the comments tree of this post.
+                        Object repliesObj = d.get("replies");
+                        if (repliesObj instanceof Map<?, ?> repliesMap && !repliesMap.isEmpty()) {
+                            List<Map<String, Object>> children_map = (List<Map<String, Object>>) repliesMap.get("data");
+                            if (children_map != null) {
+                                for (Map<String, Object> comment : collectCommentsFlattened(children_map, subreddit, permalink, postJson)) {
+                                    allComments.add(comment);
+                                }
+                            }
+                        }
                     }
+                }
+
+                // Store posts as the primary results.
+                if (redisAvailable.get()) {
+                    redisCache.updateResults(jobId, crawledPosts);
+                    // Also store comments on a secondary key.
+                    redisCache.updateComments(jobId, allComments);
+                } else {
+                    jobStore.updateResults(jobId, crawledPosts);
+                    jobStore.updateComments(jobId, allComments);
+                    jobStore.updateStatus(jobId, "COMPLETED");
                 }
 
                 if (redisAvailable.get()) {
@@ -235,7 +266,52 @@ public class RedditCrawlerService {
 
     private String cleanBody(String text) {
         if (text == null || text.isEmpty()) return "";
-        return text.replaceAll("\\s+", " ").trim();
+        return text.replaceAll("\s+", " ").trim();
+    }
+
+    /**
+     * Recursively flatten the Reddit comments tree into a flat list.
+     * Each entry is a Map with keys matching the comment JSON structure from Reddit.
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> collectCommentsFlattened(
+            List<Map<String, Object>> nodes,
+            String subreddit,
+            String parentPostPermalink,
+            Map<String, Object> parentPost) {
+        List<Map<String, Object>> flat = new ArrayList<>();
+        for (Map<String, Object> node : nodes) {
+            if (node == null || !node.containsKey("data")) continue;
+            Map<String, Object> data = (Map<String, Object>) node.get("data");
+
+            Map<String, Object> comment = new LinkedHashMap<>();
+            comment.put("author", data.getOrDefault("author", "[deleted]"));
+            comment.put("body", cleanBody(data.getOrDefault("body", "").toString()));
+            Object upsObj = data.getOrDefault("ups", 0);
+            comment.put("upvotes", upsObj instanceof Number n ? n.intValue() : 0);
+            comment.put("permalink", "https://www.reddit.com" + data.getOrDefault("permalink", ""));
+            comment.put("subreddit", subreddit);
+            Object createdObj = data.get("created_utc");
+            if (createdObj instanceof Number num) {
+                comment.put("createdUtc", Instant.ofEpochSecond(num.longValue()));
+            } else {
+                comment.put("createdUtc", null);
+            }
+            // parent post reference for display.
+            comment.put("parentPostTitle", parentPost != null ? String.valueOf(parentPost.get("title")) : "");
+            comment.put("id", data.getOrDefault("id", ""));
+            flat.add(comment);
+
+            // Recurse into nested replies if present.
+            Object repliesObj = data.get("replies");
+            if (repliesObj instanceof Map<?, ?> repliesMap && !repliesMap.isEmpty()) {
+                List<Map<String, Object>> childNodes = (List<Map<String, Object>>) repliesMap.get("data");
+                if (childNodes != null) {
+                    flat.addAll(collectCommentsFlattened(childNodes, subreddit, parentPostPermalink, parentPost));
+                }
+            }
+        }
+        return flat;
     }
 
     public static class PostDTO {

@@ -118,6 +118,27 @@ public class RedisCache {
         updateStatus(jobId, "COMPLETED");
     }
 
+    /** Store crawl comments under a separate hash key per jobId. */
+    public void updateComments(String jobId, List<Map<String, Object>> comments) throws RuntimeException {
+        try {
+            String json = JSON.writeValueAsString(comments);
+            redisTemplate.opsForHash().put(JOB_DETAIL_PREFIX + jobId, "commentsJson", json);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to serialize comments for Redis", e);
+        }
+    }
+
+    /** Get stored comments for a jobId (null if absent). */
+    public List<Map<String, Object>> loadComments(String jobId) throws RuntimeException {
+        Object val = redisTemplate.opsForHash().get(JOB_DETAIL_PREFIX + jobId, "commentsJson");
+        if (val == null || val.toString().isEmpty()) return java.util.List.of();
+        try {
+            return JSON.readValue(val.toString(), JSON.getTypeFactory().constructCollectionType(List.class, Map.class));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to deserialize comments from Redis", e);
+        }
+    }
+
     /** Delete a job from all structures. */
     @SuppressWarnings("unchecked")
     public void deleteJob(String jobId) {
