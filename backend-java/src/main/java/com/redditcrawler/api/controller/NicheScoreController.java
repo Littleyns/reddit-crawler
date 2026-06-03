@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.LinkedHashMap;
@@ -27,13 +28,7 @@ public class NicheScoreController {
         this.crawlerService = crawlerService;
     }
 
-    /**
-     * GET /api/niche/score?subreddit=X
-     * Returns a map of niche scores if available, otherwise triggers a crawl first.
-     */
-    @GetMapping("/score")
-    public ResponseEntity<Map<String, Object>> scoreNiche(@RequestParam String subreddit) {
-        // First try to get existing crawl results
+    private Map<String, Object> doNiche(String subreddit) {
         for (var job : crawlerService.getAllJobs()) {
             if (subreddit.equalsIgnoreCase((String) job.get("subreddit"))) {
                 @SuppressWarnings("unchecked")
@@ -42,22 +37,27 @@ public class NicheScoreController {
 
                 if (!posts.isEmpty()) {
                     Map<String, Double> scores = nicheScorer.score(posts);
-                    return ResponseEntity.ok(Map.of(
-                            "subreddit", subreddit,
-                            "niche", scores,
-                            "source", "cached_crawl"
-                    ));
+                    return Map.of("subreddit", subreddit, "niche", scores, "source", "cached_crawl");
                 }
             }
         }
-
-        // If no results are cached, trigger a quick crawl + score
         String jobId = crawlerService.startCrawl(subreddit, Map.of("limit", 25));
-        return ResponseEntity.ok(Map.of(
-                "subreddit", subreddit,
-                "niche", Map.<String, Double>of(),
-                "source", "crawl_in_progress",
-                "jobId", jobId
-        ));
+        return Map.of("subreddit", subreddit, "niche", Map.<String, Double>of(), "source", "crawl_in_progress", "jobId", jobId);
+    }
+
+    /**
+     * GET /api/niche/score?subreddit=X — query-param form.
+     */
+    @GetMapping("/score")
+    public ResponseEntity<Map<String, Object>> scoreNiche(@RequestParam String subreddit) {
+        return ResponseEntity.ok(doNiche(subreddit));
+    }
+
+    /**
+     * GET /api/niche-score/{subreddit}  — matches frontend API paths (path variable syntax).
+     */
+    @GetMapping("{subreddit}")
+    public ResponseEntity<Map<String, Object>> pathScoreNiche(@PathVariable String subreddit) {
+        return ResponseEntity.ok(doNiche(subreddit));
     }
 }
