@@ -1,0 +1,23 @@
+# JWT Configuration
+jwt:
+  # WARNING: Change this in production! Use a secure random 32+ character string
+  secret: change-this-in-production-jwt-secret-key-32-bytes
+  # Access token expiration (24 hours in milliseconds)
+  access-token-expiration-ms: 86400000
+  # Refresh token expiration (7 days in milliseconds)
+  refresh-token-expiration-ms: 604800000
+
+# Security configuration
+security:
+  # Enable/disable JWT authentication globally
+  jwt-enabled: true
+  # Allowed origins for CORS
+  allowed-origins:
+    - http://localhost:3000
+    - http://localhost:5173
+
+# Logging configuration
+logging:
+  level:
+    com.arabtooling.redditcrawler: DEBUG
+    org.springframework.security: DEBUG

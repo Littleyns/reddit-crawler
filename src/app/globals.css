@@ -1,0 +1,247 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+
+  --font-sans: var(--font-space-grotesk);
+  --font-mono: var(--font-ibm-plex-mono);
+
+  --ds-page: #08111f;
+  --ds-surface-base: rgba(12, 23, 41, 0.78);
+  --ds-surface-elevated: rgba(17, 31, 53, 0.9);
+  --ds-surface-strong: #162844;
+  --ds-surface-contrast: #0b1527;
+  --ds-surface-overlay: rgba(3, 10, 21, 0.78);
+
+  --ds-text-primary: #eff6ff;
+  --ds-text-secondary: #a8bdd7;
+  --ds-text-muted: #7d96b7;
+  --ds-text-inverse: #061120;
+
+  --ds-border-soft: rgba(130, 156, 197, 0.2);
+  --ds-border-strong: rgba(135, 171, 222, 0.32);
+  --ds-ring: rgba(77, 163, 255, 0.42);
+
+  --ds-primary-500: #67b3ff;
+  --ds-primary-600: #499fff;
+  --ds-primary-700: #2d84ea;
+  --ds-secondary-500: #2b4263;
+  --ds-secondary-600: #233854;
+  --ds-ghost-hover: rgba(103, 179, 255, 0.12);
+  --ds-danger-500: #ff6b7f;
+  --ds-danger-600: #f05467;
+  --ds-success-500: #52d3a6;
+  --ds-warning-500: #ffc76b;
+  --ds-info-500: #67b3ff;
+
+  --ds-shadow-panel: 0 24px 80px rgba(1, 8, 18, 0.42);
+  --ds-shadow-focus: 0 0 0 4px rgba(77, 163, 255, 0.16);
+  --ds-shadow-floating: 0 24px 90px rgba(1, 7, 15, 0.6);
+
+  --radius-xs: 0.75rem;
+  --radius-sm: 1rem;
+  --radius-md: 1.25rem;
+  --radius-lg: 1.75rem;
+  --radius-xl: 2rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  --background: var(--ds-page);
+  --foreground: var(--ds-text-primary);
+  --muted: var(--ds-text-secondary);
+  --muted-foreground: var(--ds-text-muted);
+  --card: var(--ds-surface-elevated);
+  --card-foreground: var(--ds-text-primary);
+  --popover: var(--ds-surface-elevated);
+  --popover-foreground: var(--ds-text-primary);
+  --primary: var(--ds-primary-500);
+  --primary-foreground: var(--ds-text-inverse);
+  --secondary: var(--ds-secondary-500);
+  --secondary-foreground: var(--ds-text-primary);
+  --accent: var(--ds-secondary-600);
+  --accent-foreground: var(--ds-text-primary);
+  --destructive: var(--ds-danger-500);
+  --destructive-foreground: var(--ds-text-inverse);
+  --border: var(--ds-border-soft);
+  --input: var(--ds-surface-contrast);
+  --ring: var(--ds-ring);
+  --chart-1: #67b3ff;
+  --chart-2: #52d3a6;
+  --chart-3: #ffc76b;
+  --chart-4: #ff8f66;
+  --chart-5: #d29cff;
+  --page: var(--ds-page);
+  --surface: var(--ds-surface-base);
+  --surface-strong: var(--ds-surface-elevated);
+  --surface-dark: var(--ds-surface-contrast);
+  --radius: var(--radius-sm);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-page: var(--page);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-surface-dark: var(--surface-dark);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --font-sans: var(--font-space-grotesk);
+  --font-mono: var(--font-ibm-plex-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(103, 179, 255, 0.16), transparent 32%),
+    radial-gradient(circle at 88% 10%, rgba(82, 211, 166, 0.1), transparent 24%),
+    linear-gradient(180deg, #09111d 0%, #08111f 52%, #050b14 100%);
+  color: var(--ds-text-primary);
+  font-family: var(--font-space-grotesk), system-ui, sans-serif;
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  content: "";
+  opacity: 0.3;
+  background-image:
+    linear-gradient(rgba(130, 156, 197, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(130, 156, 197, 0.08) 1px, transparent 1px);
+  background-size: 88px 88px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 90%);
+}
+
+a,
+button,
+input,
+select,
+textarea {
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  color: var(--ds-text-inverse);
+  background: rgba(103, 179, 255, 0.95);
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-shadow-focus);
+}
+
+.panel {
+  border: 1px solid var(--ds-border-soft);
+  background: linear-gradient(180deg, rgba(22, 40, 68, 0.82), rgba(11, 21, 39, 0.84));
+  backdrop-filter: blur(22px);
+  box-shadow: var(--ds-shadow-panel);
+}
+
+.panel-strong {
+  border: 1px solid var(--ds-border-strong);
+  background: linear-gradient(180deg, rgba(23, 43, 72, 0.96), rgba(10, 19, 34, 0.98));
+}
+
+.metric-glow {
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-glow::after {
+  position: absolute;
+  inset: auto -10% -40% auto;
+  width: 12rem;
+  height: 12rem;
+  border-radius: 999px;
+  content: "";
+  background: radial-gradient(circle, rgba(103, 179, 255, 0.22), transparent 70%);
+  pointer-events: none;
+}
+
+.text-balance {
+  text-wrap: balance;
+}
+
+.scroll-shell {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(130, 156, 197, 0.36) transparent;
+}
+
+.scroll-shell::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scroll-shell::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(130, 156, 197, 0.32);
+}
+
+.full-width-container {
+  width: 100%;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+@media (min-width: 640px) {
+  .full-width-container {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .full-width-container {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+}

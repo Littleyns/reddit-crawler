@@ -1,0 +1,115 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f6f3ee;
+  --foreground: #16211d;
+  --muted: #5f6f69;
+  --page: #f6f3ee;
+  --surface: rgba(255, 255, 255, 0.74);
+  --surface-strong: #ffffff;
+  --surface-dark: #153126;
+  --border: rgba(22, 33, 29, 0.1);
+  --accent: #0e8f68;
+  --accent-strong: #0a6c4e;
+  --accent-soft: rgba(14, 143, 104, 0.12);
+  --warning: #ff9f43;
+  --danger: #d8584a;
+  --shadow: 0 20px 60px rgba(20, 34, 28, 0.12);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-page: var(--page);
+  --color-muted: var(--muted);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-surface-dark: var(--surface-dark);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --font-sans: "Avenir Next", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  content: "";
+  background:
+    radial-gradient(circle at top left, rgba(14, 143, 104, 0.2), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(255, 159, 67, 0.16), transparent 28%),
+    linear-gradient(180deg, #faf8f4 0%, #f3efe6 100%);
+}
+
+body::after {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  content: "";
+  opacity: 0.35;
+  background-image:
+    linear-gradient(rgba(22, 33, 29, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(22, 33, 29, 0.03) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 85%);
+}
+
+a,
+button,
+input,
+select {
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+::selection {
+  color: white;
+  background: rgba(14, 143, 104, 0.75);
+}
+
+.panel {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(24px);
+}
+
+.panel-strong {
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+}
+
+.metric-glow {
+  background:
+    radial-gradient(circle at top right, rgba(14, 143, 104, 0.18), transparent 30%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.82));
+}
+
+.text-balance {
+  text-wrap: balance;
+}
