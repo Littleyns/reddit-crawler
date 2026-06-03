@@ -6,11 +6,13 @@ import { Sidebar } from "@/components/layout/sidebar";
 
 export function MainLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-[1600px] gap-6 px-4 py-4 sm:px-6 lg:px-8">
+    <div className="flex h-screen w-full min-w-0 bg-[var(--color-bg-base)] text-[var(--color-fg-primary)] overflow-hidden">
       <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header />
-        <main className="flex-1 pb-8">{children}</main>
+        <main className="min-h-0 flex-1 w-full min-w-0 overflow-auto px-3 sm:px-4 lg:px-5 py-3">
+          {children}
+        </main>
       </div>
     </div>
   );

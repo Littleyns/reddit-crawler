@@ -2,66 +2,67 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Database,
-  Gauge,
-  PlayCircle,
-  Settings,
-} from "lucide-react";
+import { Database, Settings as GaugeIcon, PlayCircle, Settings as SettingsIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: Gauge },
+  { href: "/dashboard", label: "Dashboard", icon: GaugeIcon },
   { href: "/controls", label: "Controls", icon: PlayCircle },
   { href: "/data", label: "Data", icon: Database },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="panel hidden w-72 shrink-0 flex-col rounded-[28px] border-white/40 px-5 py-6 lg:flex">
-      <div className="mb-8 flex items-center gap-3 px-2">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--color-surface-dark)] text-white">
-          <span className="font-mono text-sm font-medium">RC</span>
+    <aside className="flex w-48 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-low)]">
+      {/* Brand */}
+      <div className="flex h-[44px] items-center gap-2.5 border-b border-[var(--color-border)] px-3">
+        <div className="flex h-6 w-6 shrink-0 items-center justify-center bg-[var(--color-accent)] text-white font-mono text-[9px] font-bold rounded-none">
+          RC
         </div>
-        <div>
-          <p className="text-sm font-medium uppercase tracking-[0.28em] text-[var(--color-muted)]">
-            ArabTooling
-          </p>
-          <h1 className="text-lg font-semibold">Reddit Crawler</h1>
+        <div className="overflow-hidden">
+          <span className="block text-[10px] font-semibold tracking-[0.12em] uppercase text-[var(--color-fg-tertiary)]">
+            Reddit
+          </span>
+          <span className="block text-sm font-semibold leading-tight">
+            Crawler
+          </span>
         </div>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-2">
+      {/* Navigation */}
+      <nav className="flex-1 px-2 py-2 overflow-y-auto">
         {navItems.map(({ href, label, icon: Icon }) => {
           const isActive = pathname === href;
-
           return (
             <Link
               key={href}
               href={href}
               className={cn(
-                "group flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium",
+                "group flex w-full cursor-pointer items-center gap-2 rounded-none text-[11px] font-medium py-2 px-2 transition-colors",
                 isActive
-                  ? "bg-[var(--color-surface-dark)] text-white shadow-lg"
-                  : "text-[var(--color-muted)] hover:bg-white/70 hover:text-[var(--color-foreground)]",
+                  ? "bg-[var(--color-accent-soft)] text-[var(--color-accent-text)]"
+                  : "text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-high)] hover:text-[var(--color-fg-secondary)]"
               )}
             >
-              <Icon className={cn("h-4 w-4", isActive ? "text-[var(--color-warning)]" : "")} />
-              {label}
+              <Icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "text-[var(--color-accent-text)]" : "")} />
+              <span className="min-w-0 truncate">{label}</span>
             </Link>
           );
         })}
       </nav>
 
-      <div className="rounded-3xl bg-[var(--color-surface-dark)] p-5 text-white">
-        <p className="text-xs uppercase tracking-[0.28em] text-white/60">Crawler Health</p>
-        <p className="mt-3 text-3xl font-semibold">98.4%</p>
-        <p className="mt-2 text-sm text-white/70">
-          Pipeline reliability over the last 7 days across all subreddit jobs.
-        </p>
+      {/* Footer */}
+      <div className="border-t border-[var(--color-border)] px-3 py-2">
+        <div
+          style={{ backgroundColor: "#051f0e" }}
+          className="flex items-center gap-1.5 bg-[var(--color-success-bg)] px-2 py-1 text-[9px] font-semibold tracking-[0.1em] uppercase text-[var(--color-success-text)] border border-[var(--color-success-border)] rounded-none"
+        >
+          <div className="h-[5px] w-[5px] shrink-0 bg-[var(--color-success-text)] animate-pulse rounded-none" />
+          Online
+        </div>
       </div>
     </aside>
   );

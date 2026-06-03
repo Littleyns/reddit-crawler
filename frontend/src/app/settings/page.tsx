@@ -1,5 +1,6 @@
 "use client";
 
+import { cn } from "@/lib/utils";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { LoaderCircle, Save } from "lucide-react";
 import { useEffect } from "react";
@@ -9,161 +10,169 @@ import { ApiKeyInput } from "@/components/api-key-input";
 import { AuthForm } from "@/components/auth-form";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useSaveSettings, useSettings } from "@/hooks/use-reddit-crawler";
+import type { SettingsPayload } from "@/lib/types";
 
-const settingsSchema = z.object({
+// Use z.preprocess to ensure input→number coercion produces number at output type level.
+// The schema validates and outputs numbers; default values come from API (SettingsPayload).
+const formSchema = z.object({
   apiKey: z.string().min(8, "API key is required"),
   defaultSubreddit: z.string().min(2),
-  defaultDepth: z.coerce.number().min(1).max(10),
-  defaultLimit: z.coerce.number().min(10).max(1000),
+  defaultDepth: z.preprocess((val) => (typeof val === "string" || typeof val === "number" ? Number(val) : NaN), z.number().positive()),
+  defaultLimit: z.preprocess((val) => (typeof val === "string" || typeof val === "number" ? Number(val) : NaN), z.number().min(10)),
   autoExport: z.boolean(),
   exportFormat: z.enum(["csv", "json"]),
-  sessionTimeoutMinutes: z.coerce.number().min(5).max(240),
-  users: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      email: z.string().email(),
-      role: z.enum(["admin", "analyst", "viewer"]),
-    }),
-  ),
-});
-type SettingsFormInput = z.input<typeof settingsSchema>;
-type SettingsFormValues = z.output<typeof settingsSchema>;
+  sessionTimeoutMinutes: z.preprocess((val) => (typeof val === "string" || typeof val === "number" ? Number(val) : NaN), z.number().positive()),
+  users: z.array(z.object({ id: z.string(), name: z.string(), email: z.string().email(), role: z.enum(["admin", "analyst", "viewer"]) })).default([]),
+}).transform((v): SettingsPayload => v);
+
+const tabDefs = [
+  { key: "credentials" as const, label: "Credentials & Defaults" },
+  { key: "users" as const, label: "Users" },
+] as const;
 
 export default function SettingsPage() {
   const settingsQuery = useSettings();
   const saveMutation = useSaveSettings();
-  const form = useForm<SettingsFormInput, unknown, SettingsFormValues>({
-    resolver: zodResolver(settingsSchema),
-    defaultValues: settingsQuery.data,
+
+  const formValues = settingsQuery.data ?? ({
+    apiKey: "",
+    defaultSubreddit: "",
+    defaultDepth: 4,
+    defaultLimit: 250,
+    autoExport: false,
+    exportFormat: "json" as const,
+    sessionTimeoutMinutes: 30,
+    users: [],
+  } as SettingsPayload);
+
+  // Use explicit input typing since Zod output (numbers) differs from DOM inputs (strings mixed).
+  type FormInput = { apiKey: string; defaultSubreddit: string; defaultDepth?: number | undefined; defaultLimit?: number | undefined; autoExport: boolean; exportFormat: 'csv' | 'json'; sessionTimeoutMinutes?: number | undefined; users?: any[] };
+  const form = useForm<FormInput>({
+    resolver: zodResolver(formSchema),
+    defaultValues: formValues,
   });
+
   const apiKey = useWatch({ control: form.control, name: "apiKey" });
 
   useEffect(() => {
-    if (settingsQuery.data) {
-      form.reset(settingsQuery.data);
-    }
+    if (settingsQuery.data) form.reset(settingsQuery.data);
   }, [form, settingsQuery.data]);
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[1.25fr_0.85fr]">
-      <section className="panel rounded-[32px] border-white/45 p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.32em] text-[var(--color-muted)]">
-              Settings
-            </p>
-            <h1 className="mt-3 text-3xl font-semibold">API credentials and scrape defaults</h1>
-          </div>
-          <StatusBadge
-            tone={saveMutation.isSuccess ? "success" : "neutral"}
-            label={saveMutation.isSuccess ? "saved" : "draft"}
-          />
+    <div className="flex w-full flex-col gap-3 min-w-0">
+      {/* Top bar */}
+      <section className="panel-sq-dense flex items-center justify-between flex-wrap gap-2 rounded-none overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-mid)]">
+        <div>
+          <span className="section-label block mb-0.5">Settings</span>
+          <h2 className="text-sm font-semibold tracking-tight text-[var(--color-fg-primary)]">API credentials, crawl defaults, and user access.</h2>
         </div>
-
-        <form
-          className="mt-8 space-y-6"
-          onSubmit={form.handleSubmit(async (values) => {
-            await saveMutation.mutateAsync(values);
-          })}
-        >
-          <label className="flex flex-col gap-2">
-            <span className="text-sm font-medium">Reddit API key</span>
-            <ApiKeyInput value={apiKey ?? ""} onChange={(value) => form.setValue("apiKey", value)} />
-            <span className="text-sm text-[var(--color-danger)]">
-              {form.formState.errors.apiKey?.message}
-            </span>
-          </label>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-medium">Default subreddit</span>
-              <input
-                {...form.register("defaultSubreddit")}
-                className="rounded-2xl border border-[var(--color-border)] bg-white/80 px-4 py-3 outline-none focus:border-[var(--color-accent)]"
-              />
-            </label>
-
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-medium">Session timeout (minutes)</span>
-              <input
-                type="number"
-                {...form.register("sessionTimeoutMinutes")}
-                className="rounded-2xl border border-[var(--color-border)] bg-white/80 px-4 py-3 outline-none focus:border-[var(--color-accent)]"
-              />
-            </label>
-
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-medium">Default depth</span>
-              <input
-                type="number"
-                {...form.register("defaultDepth")}
-                className="rounded-2xl border border-[var(--color-border)] bg-white/80 px-4 py-3 outline-none focus:border-[var(--color-accent)]"
-              />
-            </label>
-
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-medium">Default limit</span>
-              <input
-                type="number"
-                {...form.register("defaultLimit")}
-                className="rounded-2xl border border-[var(--color-border)] bg-white/80 px-4 py-3 outline-none focus:border-[var(--color-accent)]"
-              />
-            </label>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-white/75 px-4 py-3">
-              <input type="checkbox" {...form.register("autoExport")} className="h-4 w-4" />
-              <span className="text-sm font-medium">Auto export after successful runs</span>
-            </label>
-
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-medium">Export format</span>
-              <select
-                {...form.register("exportFormat")}
-                className="rounded-2xl border border-[var(--color-border)] bg-white/80 px-4 py-3 outline-none focus:border-[var(--color-accent)]"
-              >
-                <option value="json">JSON</option>
-                <option value="csv">CSV</option>
-              </select>
-            </label>
-          </div>
-
-          <button
-            type="submit"
-            disabled={saveMutation.isPending}
-            className="inline-flex items-center gap-2 rounded-2xl bg-[var(--color-surface-dark)] px-5 py-3 text-sm font-medium text-white disabled:opacity-60"
-          >
-            {saveMutation.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Save settings
-          </button>
-        </form>
+        <StatusBadge tone={saveMutation.isSuccess ? "success" : "neutral"} label={saveMutation.isSuccess ? "Saved" : "Draft"} />
       </section>
 
-      <div className="space-y-6">
-        <AuthForm />
+      {/* Tab bar */}
+      <section className="flex gap-0 border-b border-[var(--color-border)] bg-[var(--color-surface-low)] -mx-px px-px overflow-x-auto">
+        {tabDefs.map((t) => (
+          <button key={t.key} type="button"
+            className={cn(
+              "text-[10px] font-semibold uppercase tracking-wider py-2 px-4 text-[var(--color-fg-muted)] border-b-[2px] border-transparent hover:text-[var(--color-fg-secondary)] transition-colors whitespace-nowrap rounded-none",
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </section>
 
-        <section className="panel rounded-[32px] border-white/45 p-6">
-          <p className="text-xs uppercase tracking-[0.28em] text-[var(--color-muted)]">
-            User Management
-          </p>
-          <h2 className="mt-3 text-2xl font-semibold">Current operators</h2>
-          <div className="mt-6 space-y-3">
-            {settingsQuery.data?.users.map((user) => (
-              <div
-                key={user.id}
-                className="flex items-center justify-between rounded-3xl border border-[var(--color-border)] bg-white/75 px-4 py-4"
-              >
-                <div>
-                  <p className="font-medium">{user.name}</p>
-                  <p className="mt-1 text-sm text-[var(--color-muted)]">{user.email}</p>
-                </div>
-                <StatusBadge tone="neutral" label={user.role} />
+      {/* Main grid */}
+      <div className="dense-grid xl:grid-cols-[1fr_280px]">
+        {/* Left: Settings form */}
+        <section className="panel-sq-dense flex flex-col gap-4 rounded-none overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-mid)] p-3 sm:p-4">
+          <span className="section-label block mb-0.5">Credentials & Scrape Defaults</span>
+
+          <form className="flex flex-col gap-4" onSubmit={form.handleSubmit((data) => saveMutation.mutate(data))}>
+            {/* API Key */}
+            <label className="flex flex-col gap-1">
+              <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Reddit API Key</span>
+              <ApiKeyInput value={apiKey ?? ""} onChange={(val) => form.setValue("apiKey", val as any)} />
+              {form.formState.errors.apiKey && (
+                <span className="text-[9px] text-[var(--color-danger-text)]">{form.formState.errors.apiKey.message}</span>
+              )}
+            </label>
+
+            {/* Row 1: Subreddit, Timeout, Depth */}
+            <div className="dense-grid md:grid-cols-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Default Subreddit</span>
+                <input {...form.register("defaultSubreddit")} className="input-sq rounded-none" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Session Timeout (min)</span>
+                <input type="number" step="1" {...form.register("sessionTimeoutMinutes")} className="input-sq rounded-none" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Default Depth</span>
+                <input type="number" step="1" {...form.register("defaultDepth")} className="input-sq rounded-none" />
+              </label>
+            </div>
+
+            {/* Row 2: Limit, Export Format, Checkbox */}
+            <div className="dense-grid md:grid-cols-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Default Limit</span>
+                <input type="number" step="1" {...form.register("defaultLimit")} className="input-sq rounded-none" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Export Format</span>
+                <select {...form.register("exportFormat")} className="input-sq rounded-none bg-[var(--color-surface-high)] text-[var(--color-fg-primary)]">
+                  <option value="json">JSON</option>
+                  <option value="csv">CSV</option>
+                </select>
+              </label>
+              <div className="flex items-end pb-0.5">
+                <label className="flex items-center gap-1.5 text-[11px] text-[var(--color-fg-muted)] cursor-pointer bg-[var(--color-surface-high)] border border-[var(--color-border)] px-2 py-[5px] w-full hover:border-[var(--color-border-muted)] transition-colors rounded-none">
+                  <input type="checkbox" {...form.register("autoExport")} className="accent-accent-primary h-3 w-3 rounded-none" />
+                  <span>Auto-export after runs</span>
+                </label>
               </div>
-            ))}
-          </div>
+            </div>
+
+            {/* Save button */}
+            <div className="flex items-center gap-2 pt-1">
+              <button type="submit" disabled={saveMutation.isPending} className="btn-sq btn-sq-primary rounded-none">
+                {saveMutation.isPending ? (
+                  <>
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin mr-1" /> Saving…
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-3.5 w-3.5 mr-1" /> Save Settings
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
         </section>
+
+        {/* Right sidebar */}
+        <aside className="flex flex-col gap-3 h-fit">
+          <AuthForm />
+          <section className="panel-sq-dense rounded-none overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-mid)] px-3 py-2">
+            <span className="section-label block mb-1.5">Active Users</span>
+            <div className="flex flex-col divide-y divide-[var(--color-border)] -mx-px px-px">
+              {settingsQuery.data?.users.map((user) => (
+                <div key={user.id} className="flex items-center gap-2 py-[4px]">
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center bg-[var(--color-accent)]/10 border border-[var(--color-border-muted)] text-[8px] font-bold text-[var(--color-accent-text)] rounded-none">
+                    {user.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-medium leading-tight truncate text-[var(--color-fg-primary)]">{user.name}</p>
+                    <p className="text-[9px] text-[var(--color-fg-muted)] tabular-nums whitespace-nowrap">{user.email}</p>
+                  </div>
+                  <StatusBadge tone="neutral" label={user.role} />
+                </div>
+              ))}
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
   );

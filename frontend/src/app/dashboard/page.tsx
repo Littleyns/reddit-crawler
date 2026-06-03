@@ -1,14 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import {
-  Activity,
-  ArrowRight,
-  Database,
-  Layers3,
-  MessageSquareText,
-  Sparkles,
-} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Database, Layers3, MessageSquareText, ArrowRight, Activity } from "lucide-react";
 import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useCrawlerStatus, useStats } from "@/hooks/use-reddit-crawler";
@@ -18,211 +12,141 @@ export default function DashboardPage() {
   const { data: stats } = useStats();
   const { data: status } = useCrawlerStatus();
 
-  const quickActions = [
-    {
-      href: "/controls",
-      title: "Launch a crawl run",
-      description: "Update subreddit, depth, and limits before dispatching workers.",
-    },
-    {
-      href: "/data",
-      title: "Inspect captured data",
-      description: "Search posts and comments, then export a filtered slice.",
-    },
-    {
-      href: "/settings",
-      title: "Manage crawler defaults",
-      description: "Configure API credentials, session settings, and operators.",
-    },
-  ];
-
   return (
-    <div className="space-y-6">
-      <section className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
-        <div className="panel rounded-[32px] border-white/45 p-6 sm:p-8">
-          <p className="text-xs uppercase tracking-[0.32em] text-[var(--color-muted)]">
-            Live Operations
-          </p>
-          <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <h1 className="max-w-2xl text-4xl font-semibold leading-tight text-balance">
-                Monitor the Reddit Crawler pipeline from ingestion to export.
-              </h1>
-              <p className="mt-4 max-w-2xl text-sm leading-7 text-[var(--color-muted)]">
-                The dashboard reflects live query status when backend endpoints are available and
-                falls back to seeded operational data in local development.
-              </p>
-            </div>
-            <Link
-              href="/controls"
-              className="inline-flex items-center gap-2 rounded-2xl bg-[var(--color-surface-dark)] px-5 py-3 text-sm font-medium text-white"
-            >
-              Quick start
-              <ArrowRight className="h-4 w-4" />
-            </Link>
+    <div className="flex w-full flex-col gap-3 min-w-0">
+      {/* Stats row — compact dense 4-up, fills entire width */}
+      <div className="dense-grid grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Total Posts" value={stats?.totalPosts ?? 0} change="+12.7% vs last week" icon={Layers3} />
+        <StatCard label="Total Comments" value={stats?.totalComments ?? 0} change="+8.4% vs last week" icon={MessageSquareText} />
+        <StatCard label="Sessions" value={stats?.totalSessions ?? 0} change={`${stats?.activeSubreddits ?? 0} subs`} icon={Activity} />
+        <StatCard label="Queue Depth" value={stats?.queueDepth ?? 0} change="Next: r/MachineLearning" icon={Database} />
+      </div>
+
+      {/* Main grid: overview + sidebar — w-full */}
+      <div className="dense-grid xl:grid-cols-[1fr_280px]">
+        {/* Left panel: full-width live operations */}
+        <section className="panel-sq-dense flex flex-col gap-3">
+          {/* Header */}
+          <div>
+            <span className="section-label block mb-1">Live Operations</span>
+            <h2 className="text-sm font-semibold tracking-tight text-[var(--color-fg-primary)] mt-0.5">Monitor the crawler pipeline</h2>
           </div>
 
-          <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="Total posts" value={stats?.totalPosts ?? 0} change="+12.7% vs last week" icon={Layers3} />
-            <StatCard
-              label="Total comments"
-              value={stats?.totalComments ?? 0}
-              change="+8.4% vs last week"
-              icon={MessageSquareText}
-            />
-            <StatCard
-              label="Sessions"
-              value={stats?.totalSessions ?? 0}
-              change="14 active this month"
-              icon={Activity}
-            />
-            <StatCard
-              label="Queue depth"
-              value={stats?.queueDepth ?? 0}
-              change={`${stats?.activeSubreddits ?? 0} active subreddits`}
-              icon={Database}
-            />
-          </div>
-        </div>
-
-        <div className="panel rounded-[32px] border-white/45 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.28em] text-[var(--color-muted)]">
-                Session Snapshot
-              </p>
-              <h2 className="mt-3 text-2xl font-semibold">Current run</h2>
-            </div>
-            <StatusBadge
-              tone={status?.isRunning ? "running" : "neutral"}
-              label={status?.isRunning ? status.mode : "idle"}
-            />
-          </div>
-
-          <div className="mt-8 space-y-6">
-            <div>
-              <p className="text-sm text-[var(--color-muted)]">Subreddit</p>
-              <p className="mt-1 text-2xl font-semibold">
-                {status?.currentSubreddit ?? "No active job"}
-              </p>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-[var(--color-muted)]">Progress</span>
-                <span className="font-medium">{status?.progress ?? 0}%</span>
+          {/* Crawler status card */}
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-center">
+            <div className="space-y-2">
+              <div>
+                <span className="text-[10px] text-[var(--color-fg-muted)] font-medium">Current target</span>
+                <p className="text-sm font-bold tabular-nums text-[var(--color-fg-primary)]">{status?.currentSubreddit ?? "No active job"}</p>
               </div>
-              <div className="mt-3 h-3 rounded-full bg-[var(--color-accent-soft)]">
-                <div
-                  className="h-3 rounded-full bg-[var(--color-accent)]"
-                  style={{ width: `${status?.progress ?? 0}%` }}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="rounded-2xl bg-white/75 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">
-                  Workers
-                </p>
-                <p className="mt-2 text-2xl font-semibold">{status?.activeWorkers ?? 0}</p>
-              </div>
-              <div className="rounded-2xl bg-white/75 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">
-                  RPM
-                </p>
-                <p className="mt-2 text-2xl font-semibold">{status?.requestsPerMinute ?? 0}</p>
-              </div>
-            </div>
-
-            <div className="rounded-2xl bg-[var(--color-surface-dark)] p-5 text-white">
-              <p className="text-xs uppercase tracking-[0.22em] text-white/60">Last run</p>
-              <p className="mt-2 text-xl font-semibold">
-                {status?.lastRunAt ? formatDate(status.lastRunAt) : "Unavailable"}
-              </p>
-              <p className="mt-2 text-sm text-white/65">
-                Success rate {stats?.successRate ?? 0}% over recent sessions.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">
-        <div className="panel rounded-[32px] border-white/45 p-6">
-          <div className="flex items-center gap-3">
-            <Sparkles className="h-5 w-5 text-[var(--color-accent)]" />
-            <div>
-              <p className="text-xs uppercase tracking-[0.28em] text-[var(--color-muted)]">
-                Recent Activity
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold">Timeline</h2>
-            </div>
-          </div>
-
-          <div className="mt-8 space-y-5">
-            {stats?.activities.map((item) => (
-              <article
-                key={item.id}
-                className="flex gap-4 rounded-3xl border border-[var(--color-border)] bg-white/70 p-4"
-              >
-                <div className="mt-1 h-3 w-3 rounded-full bg-[var(--color-accent)]" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <h3 className="text-base font-semibold">{item.title}</h3>
-                    <StatusBadge tone={item.status} label={item.status} />
-                  </div>
-                  <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
-                    {item.description}
-                  </p>
-                  <p className="mt-3 text-xs uppercase tracking-[0.18em] text-[var(--color-muted)]">
-                    {formatRelativeTime(item.occurredAt)}
-                  </p>
+              <div>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[10px] text-[var(--color-fg-muted)]">Progress</span>
+                  <span className="text-xs font-bold tabular-nums text-[var(--color-accent-text)]">{status?.progress ?? 0}%</span>
                 </div>
-              </article>
+                <div className="h-[4px] w-full bg-[var(--color-surface-high)] border border-[var(--color-border)] overflow-hidden">
+                  <div
+                    className="h-full bg-[var(--color-accent)] transition-[width] duration-300"
+                    style={{ width: `${status?.progress ?? 0}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+            <StatusBadge tone={status?.isRunning ? "running" : "neutral"} label={status?.isRunning ? status.mode : "Idle"} />
+          </div>
+
+          {/* Workers / RPM mini stats */}
+          <div className="grid grid-cols-2 gap-px bg-[var(--color-border)] rounded-none">
+            {[
+              { label: "Workers", value: String(status?.activeWorkers ?? 0) },
+              { label: "RPM", value: String(status?.requestsPerMinute ?? 0) },
+            ].map((s) => (
+              <div key={s.label} className="bg-[var(--color-surface-mid)] p-3">
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">{s.label}</span>
+                <p className="text-xl font-bold tabular-nums leading-none mt-0.5 text-[var(--color-fg-primary)]">{s.value}</p>
+              </div>
             ))}
           </div>
-        </div>
 
-        <div className="space-y-6">
-          <section className="panel rounded-[32px] border-white/45 p-6">
-            <p className="text-xs uppercase tracking-[0.28em] text-[var(--color-muted)]">
-              Quick Actions
-            </p>
-            <div className="mt-6 space-y-4">
-              {quickActions.map((action) => (
-                <Link
-                  key={action.href}
-                  href={action.href}
-                  className="block rounded-3xl border border-[var(--color-border)] bg-white/70 p-5 hover:bg-white"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h3 className="text-lg font-semibold">{action.title}</h3>
-                      <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
-                        {action.description}
-                      </p>
-                    </div>
-                    <ArrowRight className="mt-1 h-4 w-4 text-[var(--color-muted)]" />
+          {/* Recent activity */}
+          <div className="pt-2 border-t border-[var(--color-border)]">
+            <span className="section-label block mb-1.5">Recent Activity</span>
+            <div className="flex flex-col divide-y divide-[var(--color-border)]">
+              {stats?.activities.map((item) => (
+                <article key={item.id} className="flex items-start gap-2 py-[5px] -mx-1 px-1 transition-colors hover:bg-[var(--color-accent-soft)] rounded-none">
+                  <div className={cn(
+                    "mt-[3px] h-[5px] w-[5px] shrink-0 rounded-none",
+                    item.status === "success" ? "bg-[var(--color-success-text)]" :
+                      item.status === "running" ? "bg-[var(--color-accent)] animate-pulse" :
+                        item.status === "warning" ? "bg-[var(--color-warning-text)]" :
+                          "bg-[var(--color-danger-text)]"
+                  )} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-medium leading-tight truncate text-[var(--color-fg-primary)]">{item.title}</p>
+                    <span className="inline-flex items-center ml-2">
+                      <StatusBadge tone={item.status as any} label={item.status} />
+                    </span>
+                    <p className="text-[10px] text-[var(--color-fg-muted)] mt-0.5 line-clamp-1">{item.description}</p>
                   </div>
+                  <span className="shrink-0 text-[9px] font-mono text-[var(--color-fg-muted)] whitespace-nowrap tabular-nums">
+                    {formatRelativeTime(item.occurredAt)}
+                  </span>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Right sidebar: quick actions + health */}
+        <aside className="flex flex-col gap-3">
+          {/* Quick Actions Panel */}
+          <section className="panel-sq-dense">
+            <span className="section-label block mb-1.5">Quick Actions</span>
+            <div className="flex flex-col divide-y divide-[var(--color-border)] -mx-px px-px">
+              {[
+                { label: "Launch a crawl run", href: "/controls" },
+                { label: "Inspect captured data", href: "/data" },
+                { label: "Manage crawler defaults", href: "/settings" },
+              ].map((link, i) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={cn(
+                    "flex items-center justify-between py-1.5 px-2 text-[11px] font-medium text-[var(--color-accent-text)] hover:text-[var(--color-fg-secondary)] transition-colors",
+                    i < 2 && "border-b border-[var(--color-border)]"
+                  )}
+                >
+                  <span className="truncate">{link.label}</span>
+                  <ArrowRight className="h-3 w-3 shrink-0 opacity-40 group-hover:opacity-100" />
                 </Link>
               ))}
             </div>
           </section>
 
-          <section className="panel rounded-[32px] border-white/45 p-6">
-            <p className="text-xs uppercase tracking-[0.28em] text-[var(--color-muted)]">
-              Notes
-            </p>
-            <h2 className="mt-3 text-xl font-semibold">Development mode fallback</h2>
-            <p className="mt-4 text-sm leading-7 text-[var(--color-muted)]">
-              The frontend is resilient to missing backend routes so the app remains demoable while
-              the API surface is still being implemented. Once live endpoints respond, React Query
-              will use them automatically.
+          {/* Health panel */}
+          <section className="panel-sq-dense">
+            <span className="section-label block mb-1.5">System Status</span>
+            <div className="flex items-center gap-1.5 mb-2">
+              <div className="h-[8px] w-[8px] bg-[var(--color-success-text)] animate-pulse rounded-none" />
+              <p className="text-sm font-bold tabular-nums leading-tight text-[var(--color-fg-primary)]">98.4%</p>
+              <span className="text-[9px] text-[var(--color-fg-muted)] ml-auto leading-none mt-[1px]">health</span>
+            </div>
+            <p className="text-[10px] text-[var(--color-fg-muted)] leading-relaxed">
+              Pipeline reliability across all subreddit jobs in the last 7 days.
             </p>
           </section>
-        </div>
-      </section>
+
+          {/* Environment panel */}
+          <section className="panel-sq-dense px-3 py-2">
+            <div className="flex items-center gap-1">
+              <div className="h-[5px] w-[5px] bg-[var(--color-success-text)] rounded-none" />
+              <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-muted)]">
+                Backend API connected
+              </span>
+            </div>
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }

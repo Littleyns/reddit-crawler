@@ -1,85 +1,107 @@
 "use client";
 
-import { Radar, TimerReset, Waypoints } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Clock, Database, Layers3, Zap } from "lucide-react";
+import { useCrawlerStatus } from "@/hooks/use-reddit-crawler";
+import { formatDate, formatRelativeTime } from "@/lib/utils";
 import { CrawlerControl } from "@/components/crawler-control";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { useCrawlerStatus } from "@/hooks/use-reddit-crawler";
-import { formatDate } from "@/lib/utils";
 
 export default function ControlsPage() {
   const { data: status } = useCrawlerStatus();
 
   return (
-    <div className="space-y-6">
-      <section className="grid gap-6 xl:grid-cols-[1.3fr_0.9fr]">
+    <div className="flex w-full flex-col gap-3 min-w-0">
+      {/* Top section: control panel + telemetry */}
+      <div className="dense-grid xl:grid-cols-[1fr_280px]">
+        {/* Left: full crawler control surface — fills available width */}
         <CrawlerControl />
 
-        <aside className="space-y-6">
-          <section className="panel rounded-[30px] border-white/45 p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs uppercase tracking-[0.28em] text-[var(--color-muted)]">
-                  Runtime State
-                </p>
-                <h2 className="mt-3 text-2xl font-semibold">Live telemetry</h2>
-              </div>
-              <StatusBadge
-                tone={status?.isRunning ? "running" : "neutral"}
-                label={status?.isRunning ? "running" : "idle"}
-              />
+        {/* Right: live telemetry sidebar */}
+        <aside className="flex flex-col gap-3">
+          {/* Telemetry panel */}
+          <section className="panel-sq-dense">
+            <span className="section-label block mb-1.5">Live Telemetry</span>
+
+            <div className="mb-2">
+              <StatusBadge tone={status?.isRunning ? "running" : "neutral"} label={status?.isRunning ? status.mode : "Idle"} />
             </div>
 
-            <div className="mt-8 space-y-4">
-              <div className="rounded-3xl bg-white/75 p-4">
-                <div className="flex items-center gap-3">
-                  <Radar className="h-5 w-5 text-[var(--color-accent)]" />
-                  <div>
-                    <p className="text-sm font-medium">Current target</p>
-                    <p className="mt-1 text-sm text-[var(--color-muted)]">
-                      {status?.currentSubreddit ?? "No active job"}
-                    </p>
-                  </div>
+            <div className="flex flex-col divide-y divide-[var(--color-border)]">
+              {[
+                { icon: Layers3, label: "Target", value: status?.currentSubreddit ?? "—" },
+                { icon: Zap, label: "Workers", value: String(status?.activeWorkers ?? 0) },
+                { icon: Database, label: "Request/min", value: String(status?.requestsPerMinute ?? 0) },
+              ].map(({ icon: Icon, label, value }) => (
+                <div key={label} className="flex items-center gap-2 py-[5px] -mx-1 px-1 transition-colors hover:bg-[var(--color-accent-soft)] rounded-none">
+                  <Icon className="h-3 w-3 shrink-0 text-[var(--color-fg-muted)]" />
+                  <span className="text-[9px] font-semibold text-[var(--color-fg-muted)] uppercase tracking-wider">{label}</span>
+                  <span className="ml-auto text-[10px] tabular-nums text-[var(--color-fg-primary)]">{value}</span>
                 </div>
-              </div>
+              ))}
+            </div>
 
-              <div className="rounded-3xl bg-white/75 p-4">
-                <div className="flex items-center gap-3">
-                  <Waypoints className="h-5 w-5 text-[var(--color-warning)]" />
-                  <div>
-                    <p className="text-sm font-medium">Collection depth</p>
-                    <p className="mt-1 text-sm text-[var(--color-muted)]">
-                      {status?.config.depth ?? 0} levels, limit {status?.config.limit ?? 0}
-                    </p>
-                  </div>
-                </div>
+            {/* Progress */}
+            <div className="mt-2 space-y-1">
+              <div className="flex justify-between text-[9px] text-[var(--color-fg-muted)]">
+                <span>Progress</span>
+                <span className="tabular-nums">{status?.progress ?? 0}%</span>
               </div>
+              <div className="h-[3px] bg-[var(--color-surface-high)] border border-[var(--color-border)] overflow-hidden">
+                <div
+                  className="h-full bg-[var(--color-accent)] transition-[width]"
+                  style={{ width: `${status?.progress ?? 0}%` }}
+                />
+              </div>
+            </div>
 
-              <div className="rounded-3xl bg-white/75 p-4">
-                <div className="flex items-center gap-3">
-                  <TimerReset className="h-5 w-5 text-[var(--color-danger)]" />
-                  <div>
-                    <p className="text-sm font-medium">Last change</p>
-                    <p className="mt-1 text-sm text-[var(--color-muted)]">
-                      {status?.lastRunAt ? formatDate(status.lastRunAt) : "Unavailable"}
-                    </p>
-                  </div>
-                </div>
+            {/* Last run */}
+            {status?.lastRunAt && (
+              <div className="mt-2 flex items-center gap-1.5 py-0.5">
+                <Clock className="h-[10px] w-[10px] text-[var(--color-fg-muted)]" />
+                <span className="text-[9px] text-[var(--color-fg-muted)]">Last run: </span>
+                <span className="text-[9px] tabular-nums text-[var(--color-fg-primary)]">{formatRelativeTime(status.lastRunAt)}</span>
               </div>
+            )}
+          </section>
+
+          {/* Active Configuration panel */}
+          <section className="panel-sq-dense">
+            <span className="section-label block mb-1.5">Active Configuration</span>
+            <div className="flex flex-col divide-y divide-[var(--color-border)] -mx-px px-px">
+              {[
+                { k: "Subreddit", v: status?.currentSubreddit ?? "—" },
+                { k: "Depth", v: String(status?.config.depth ?? 0) },
+                { k: "Limit", v: String(status?.config.limit ?? 0) },
+                { k: "Comments", v: status?.config.includeComments ? "true" : "false" },
+                { k: "Keywords", v: status?.config.keywords || "—" },
+              ].map(({ k, v }) => (
+                <div key={k} className="flex items-center py-[4px] -mx-1 px-2">
+                  <span className="text-[9px] text-[var(--color-fg-muted)] w-20 shrink-0 tabular-nums uppercase tracking-wider">{k}</span>
+                  <span className="ml-auto text-[10px] tabular-nums font-medium truncate max-w-[calc(100%-6rem)] text-[var(--color-fg-primary)]">{v || "—"}</span>
+                </div>
+              ))}
             </div>
           </section>
 
-          <section className="panel rounded-[30px] border-white/45 p-6">
-            <p className="text-xs uppercase tracking-[0.28em] text-[var(--color-muted)]">
-              Control Notes
-            </p>
-            <ul className="mt-5 space-y-3 text-sm leading-6 text-[var(--color-muted)]">
-              <li>Use smaller limits during tuning to validate scraper behavior quickly.</li>
-              <li>Keyword filtering is optional and helps reduce irrelevant payload volume.</li>
-              <li>When comments are enabled, expect longer runtimes and higher API consumption.</li>
+          {/* Control Tips panel */}
+          <section className="panel-sq-dense px-3 py-2">
+            <span className="section-label block mb-1.5">Tips</span>
+            <ul className="flex flex-col gap-1 text-[10px] text-[var(--color-fg-muted)] leading-relaxed">
+              {[
+                "Use smaller limits during tuning to validate scraper behavior.",
+                "Keyword filtering is optional and helps reduce payload volume.",
+                "With comments enabled, expect longer runtimes and higher API usage.",
+              ].map((tip) => (
+                <li key={tip} className="flex items-start gap-1.5">
+                  <span className="mt-[2px] h-[3px] w-[3px] shrink-0 rounded-none bg-[var(--color-border-muted)]" />
+                  <span>{tip}</span>
+                </li>
+              ))}
             </ul>
           </section>
         </aside>
-      </section>
+      </div>
     </div>
   );
 }

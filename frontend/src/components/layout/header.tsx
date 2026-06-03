@@ -2,9 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, ChevronDown, Radio } from "lucide-react";
-import { useCrawlerStatus } from "@/hooks/use-reddit-crawler";
 import { cn } from "@/lib/utils";
+import { useCrawlerStatus } from "@/hooks/use-reddit-crawler";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
@@ -17,63 +16,68 @@ export function Header() {
   const pathname = usePathname();
   const { data: crawlerStatus } = useCrawlerStatus();
 
+  const titles: Record<string, string> = {
+    "/dashboard": "Crawler Dashboard",
+    "/controls": "Crawler Controls",
+    "/data": "Data Explorer",
+    "/settings": "Settings",
+  };
+
   return (
-    <header className="panel mb-6 flex flex-col gap-4 rounded-[28px] border-white/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex-1">
-        <p className="text-xs font-medium uppercase tracking-[0.32em] text-[var(--color-muted)]">
-          Command Center
-        </p>
-        <h2 className="mt-2 text-2xl font-semibold text-balance">
-          Operate the crawler, inspect live throughput, and export collected Reddit data.
-        </h2>
-        <nav className="mt-4 flex flex-wrap gap-2 lg:hidden">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "rounded-full px-3 py-2 text-sm font-medium",
-                pathname === item.href
-                  ? "bg-[var(--color-surface-dark)] text-white"
-                  : "bg-white/75 text-[var(--color-muted)]",
+    <header className="w-full border-b border-[var(--color-border)] bg-[var(--color-surface-low)]">
+      {/* Top row: breadcrumb + status */}
+      <div className="flex items-center justify-between w-full px-3 sm:px-4 lg:px-5" style={{ height: "40px" }}>
+        {/* Breadcrumb-style nav */}
+        <nav className="flex items-center gap-1 text-[11px] text-[var(--color-fg-muted)]">
+          <span className="shrink-0">Home</span>
+          <span className="text-[var(--color-border)]">/</span>
+          {navItems.map((item, i, arr) => (
+            <div key={item.href} className="flex items-center gap-1 shrink-0">
+              <Link
+                href={item.href}
+                className={cn(
+                  "transition-colors rounded-none px-1",
+                  pathname === item.href
+                    ? "text-[var(--color-accent-text)] font-medium"
+                    : "text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)]"
+                )}
+              >
+                {item.label}
+              </Link>
+              {i < arr.length - 1 && (
+                <span className="text-[var(--color-border)]">/</span>
               )}
-            >
-              {item.label}
-            </Link>
+            </div>
           ))}
         </nav>
+
+        <div className="flex items-center gap-3 shrink-0">
+          {/* Crawler status indicator */}
+          <div className={cn(
+            "hidden sm:flex items-center gap-2 border border-[var(--color-border)] bg-[var(--color-surface-mid)] px-2.5 py-[4px]",
+          )}>
+            <div className={cn(
+              "h-[5px] w-[5px] rounded-none",
+              crawlerStatus?.isRunning ? "bg-[var(--color-success-text)] animate-pulse" : "bg-[var(--color-danger-text)]",
+            )} />
+            <span className="text-[10px] font-mono font-semibold tracking-[0.1em] uppercase text-[var(--color-fg-muted)]">
+              {crawlerStatus?.isRunning ? crawlerStatus.mode : "IDLE"}
+            </span>
+          </div>
+
+          {/* User */}
+          <button className="flex items-center gap-2 border border-[var(--color-border)] bg-[var(--color-surface-mid)] px-2 py-1 transition-colors hover:bg-[var(--color-surface-high)]">
+            <div className="flex h-5 w-5 shrink-0 items-center justify-center bg-[var(--color-accent)] text-[8px] font-bold text-white rounded-none">
+              AR
+            </div>
+            <span className="hidden lg:inline text-[11px] font-medium leading-none text-[var(--color-fg-secondary)]">Amina R.</span>
+          </button>
+        </div>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="flex items-center gap-3 rounded-2xl bg-white/75 px-4 py-3">
-          <div
-            className={`h-2.5 w-2.5 rounded-full ${
-              crawlerStatus?.isRunning ? "bg-[var(--color-accent)]" : "bg-[var(--color-danger)]"
-            }`}
-          />
-          <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">Status</p>
-            <p className="text-sm font-medium">
-              {crawlerStatus?.isRunning ? "Crawler running" : "Crawler idle"}
-            </p>
-          </div>
-          <Radio className="h-4 w-4 text-[var(--color-muted)]" />
-        </div>
-
-        <button className="flex items-center justify-center rounded-2xl border border-[var(--color-border)] bg-white/70 p-3 text-[var(--color-muted)] hover:bg-white">
-          <Bell className="h-4 w-4" />
-        </button>
-
-        <button className="flex items-center gap-3 rounded-2xl bg-[var(--color-surface-dark)] px-4 py-3 text-left text-white">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/12">
-            <span className="text-sm font-semibold">AR</span>
-          </div>
-          <div>
-            <p className="text-sm font-medium">Amina Rahman</p>
-            <p className="text-xs text-white/65">Operations Admin</p>
-          </div>
-          <ChevronDown className="h-4 w-4 text-white/60" />
-        </button>
+      {/* Page title row */}
+      <div className="w-full px-3 pb-2 pt-1.5 sm:px-4 lg:px-5">
+        <h2 className="text-sm font-semibold tracking-tight text-[var(--color-fg-primary)]">{titles[pathname] || "Home"}</h2>
       </div>
     </header>
   );

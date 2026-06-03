@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { LoaderCircle, PauseCircle, PlayCircle } from "lucide-react";
+import { Loader, Pause, Play } from "lucide-react";
 import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -10,19 +10,17 @@ import { StatusBadge } from "@/components/ui/status-badge";
 
 const controlSchema = z.object({
   subreddit: z.string().min(2, "Subreddit is required"),
-  depth: z.coerce.number().min(1).max(10),
-  limit: z.coerce.number().min(10).max(1000),
+  depth: z.preprocess((val) => Number(val), z.number().min(1).max(10)),
+  limit: z.preprocess((val) => Number(val), z.number().min(10).max(1000)),
   includeComments: z.boolean(),
   keywords: z.string().optional(),
 });
-
 type ControlFormInput = z.input<typeof controlSchema>;
-type ControlFormValues = z.output<typeof controlSchema>;
 
 export function CrawlerControl() {
   const { data: status } = useCrawlerStatus();
   const { startMutation, stopMutation } = useCrawlerControls();
-  const form = useForm<ControlFormInput, unknown, ControlFormValues>({
+  const form = useForm<ControlFormInput>({
     resolver: zodResolver(controlSchema),
     defaultValues: {
       subreddit: status?.config.subreddit ?? "machinelearning",
@@ -33,101 +31,64 @@ export function CrawlerControl() {
     },
   });
 
-  const isStarting = startMutation.isPending;
-  const isStopping = stopMutation.isPending;
-
   useEffect(() => {
-    if (status?.config) {
-      form.reset(status.config);
-    }
+    if (status?.config) form.reset(status.config);
   }, [form, status?.config]);
 
+  const starting = startMutation.isPending;
+  const stopping = stopMutation.isPending;
+
   return (
-    <section className="panel rounded-[30px] border-white/45 p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <section className="panel-sq-dense w-full rounded-none overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-mid)] p-3 sm:p-4">
+      {/* Header row */}
+      <div className="flex items-start justify-between mb-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.28em] text-[var(--color-muted)]">
-            Crawler Control
-          </p>
-          <h3 className="mt-3 text-2xl font-semibold">Start, stop, and retune live jobs</h3>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--color-muted)]">
-            Use this panel to launch a crawl run, adjust collection depth, and optionally narrow
-            the dataset with keyword filters.
-          </p>
+          <span className="section-label block mb-0.5">Crawler Control</span>
+          <h3 className="text-sm font-semibold tracking-tight leading-tight text-[var(--color-fg-primary)]">
+            Start, stop, and retune live jobs
+          </h3>
         </div>
-        <StatusBadge
-          tone={status?.isRunning ? "running" : "neutral"}
-          label={status?.isRunning ? `Live • ${status.mode}` : "Idle"}
-        />
+        <StatusBadge tone={status?.isRunning ? "running" : "neutral"} label={status?.isRunning ? status.mode : "Idle"} />
       </div>
 
-      <form
-        className="mt-8 grid gap-4 lg:grid-cols-2"
-        onSubmit={form.handleSubmit(async (values) => {
-          await startMutation.mutateAsync(values);
-        })}
-      >
-        <label className="flex flex-col gap-2">
-          <span className="text-sm font-medium">Target subreddit</span>
-          <input
-            {...form.register("subreddit")}
-            className="rounded-2xl border border-[var(--color-border)] bg-white/80 px-4 py-3 outline-none focus:border-[var(--color-accent)]"
-            placeholder="machinelearning"
-          />
-          <span className="text-sm text-[var(--color-danger)]">
-            {form.formState.errors.subreddit?.message}
-          </span>
-        </label>
+      {/* Controls form */}
+      <form className="flex flex-col gap-3" onSubmit={form.handleSubmit((v) => startMutation.mutate(v))}>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2">
+          <label className="xl:col-span-2 flex flex-col gap-1">
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Target subreddit</span>
+            <input {...form.register("subreddit")} className="input-sq rounded-none" placeholder="machinelearning" />
+            {form.formState.errors.subreddit && (
+              <span className="text-[9px] text-[var(--color-danger-text)]">{form.formState.errors.subreddit.message}</span>
+            )}
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Keywords</span>
+            <input {...form.register("keywords")} className="input-sq rounded-none" placeholder="llm, agents" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Depth</span>
+            <input type="number" {...form.register("depth")} className="input-sq rounded-none" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Limit</span>
+            <input type="number" {...form.register("limit")} className="input-sq rounded-none" />
+          </label>
+          <label className="xl:col-span-2 flex items-center gap-1.5 py-[4px] px-3 border border-[var(--color-border)] bg-[var(--color-surface-high)] text-[11px] text-[var(--color-fg-muted)] cursor-pointer hover:border-[var(--color-border-muted)] transition-colors rounded-none">
+            <input type="checkbox" {...form.register("includeComments")} className="accent-accent-primary h-3 w-3 rounded-none" />
+            <span className="text-[11px] font-medium">Include comments</span>
+          </label>
+        </div>
 
-        <label className="flex flex-col gap-2">
-          <span className="text-sm font-medium">Keywords</span>
-          <input
-            {...form.register("keywords")}
-            className="rounded-2xl border border-[var(--color-border)] bg-white/80 px-4 py-3 outline-none focus:border-[var(--color-accent)]"
-            placeholder="llm, agents, benchmark"
-          />
-        </label>
-
-        <label className="flex flex-col gap-2">
-          <span className="text-sm font-medium">Depth</span>
-          <input
-            type="number"
-            {...form.register("depth")}
-            className="rounded-2xl border border-[var(--color-border)] bg-white/80 px-4 py-3 outline-none focus:border-[var(--color-accent)]"
-          />
-        </label>
-
-        <label className="flex flex-col gap-2">
-          <span className="text-sm font-medium">Limit</span>
-          <input
-            type="number"
-            {...form.register("limit")}
-            className="rounded-2xl border border-[var(--color-border)] bg-white/80 px-4 py-3 outline-none focus:border-[var(--color-accent)]"
-          />
-        </label>
-
-        <label className="flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-white/70 px-4 py-3 lg:col-span-2">
-          <input type="checkbox" {...form.register("includeComments")} className="h-4 w-4" />
-          <span className="text-sm font-medium">Include comment scraping in this session</span>
-        </label>
-
-        <div className="lg:col-span-2 flex flex-col gap-3 sm:flex-row">
-          <button
-            type="submit"
-            disabled={isStarting}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--color-surface-dark)] px-5 py-3 text-sm font-medium text-white disabled:opacity-60"
-          >
-            {isStarting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
-            Start crawler
+        {/* Actions */}
+        <div className="flex items-center gap-2 pt-0.5">
+          <button type="submit" disabled={starting} className="btn-sq btn-sq-primary rounded-none px-3 py-[5px] disabled:opacity-50 flex items-center gap-1.5">
+            {starting ? <Loader className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+            Start Crawler
           </button>
-          <button
-            type="button"
-            onClick={() => stopMutation.mutate()}
-            disabled={isStopping || !status?.isRunning}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-[var(--color-border)] bg-white/80 px-5 py-3 text-sm font-medium disabled:opacity-60"
-          >
-            {isStopping ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <PauseCircle className="h-4 w-4" />}
-            Stop crawler
+          <button type="button" onClick={() => stopMutation.mutate()} disabled={stopping || !status?.isRunning}
+            className="btn-sq btn-sq-muted px-3 py-[5px] disabled:opacity-30 flex items-center gap-1.5 rounded-none">
+            {stopping ? <Loader className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />}
+            Stop Crawler
           </button>
         </div>
       </form>

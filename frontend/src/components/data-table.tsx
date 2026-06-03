@@ -12,113 +12,82 @@ interface Column<T> {
 }
 
 export function DataTable<T extends { id: string | number }>({
-  columns,
-  rows,
-  page,
-  totalPages,
-  onPageChange,
+  columns, rows, page, totalPages, onPageChange,
 }: {
-  columns: readonly Column<T>[];
-  rows: T[];
-  page: number;
-  totalPages: number;
-  onPageChange: (page: number) => void;
+  columns: readonly Column<T>[]; rows: T[];
+  page: number; totalPages: number;
+  onPageChange: (p: number) => void;
 }) {
   const [sortKey, setSortKey] = useState<keyof T | null>(null);
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [sortDir, setSortDir] = useState<"asc"|"desc">("desc");
 
   const sortedRows = useMemo(() => {
-    if (!sortKey) {
-      return rows;
-    }
-
-    return [...rows].sort((left, right) => {
-      const leftValue = left[sortKey];
-      const rightValue = right[sortKey];
-
-      if (leftValue === rightValue) {
-        return 0;
-      }
-
-      const comparison = String(leftValue).localeCompare(String(rightValue), undefined, {
-        numeric: true,
-        sensitivity: "base",
-      });
-
-      return sortDirection === "asc" ? comparison : comparison * -1;
+    if (!sortKey) return rows;
+    const sorted = [...rows].sort((a,b) => {
+      const vA = String(a[sortKey] ?? "");
+      const vB = String(b[sortKey] ?? "");
+      return sortDir === "asc" ? vA.localeCompare(vB, undefined, {numeric:true}) : vB.localeCompare(vA, undefined, {numeric:true});
     });
-  }, [rows, sortDirection, sortKey]);
+    return sorted;
+  }, [rows, sortKey, sortDir]);
+
+  const toggleSort = (col: Column<T>) => {
+    if (sortKey === col.key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(col.key); setSortDir("desc"); }
+  };
 
   return (
-    <div className="overflow-hidden rounded-[28px] border border-[var(--color-border)] bg-white/80">
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-left">
-          <thead className="border-b border-[var(--color-border)] bg-white/90">
+    <div className="w-full min-w-0 flex-1 rounded-none overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-mid)]">
+      <table className="w-full h-full table-auto text-left border-collapse">
+        <thead>
+          <tr>
+            {columns.map((col) => (
+              <th key={String(col.key)} className={cn("px-3 py-2", col.className)}>
+                <button type="button" onClick={() => toggleSort(col)} className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] transition-colors">
+                  {col.label}
+                  <ArrowDownUp className="h-3 w-3 opacity-40" />
+                </button>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sortedRows.length === 0 && (
             <tr>
-              {columns.map((column) => (
-                <th
-                  key={String(column.key)}
-                  className={cn(
-                    "px-4 py-3 text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-muted)]",
-                    column.className,
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (sortKey === column.key) {
-                        setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
-                        return;
-                      }
-
-                      setSortKey(column.key);
-                      setSortDirection("desc");
-                    }}
-                    className="inline-flex items-center gap-2"
-                  >
-                    {column.label}
-                    <ArrowDownUp className="h-3.5 w-3.5" />
-                  </button>
-                </th>
+              <td colSpan={columns.length} className="text-center py-8 text-[var(--color-fg-muted)] text-xs">No data found</td>
+            </tr>
+          )}
+          {sortedRows.map((row) => (
+            <tr key={row.id} className="[&>td]:border-b [&>td]:border-[var(--color-border)]">
+              {columns.map((col) => (
+                <td key={String(col.key)} className="px-3 py-1.5 text-xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-accent-soft)]">
+                  {col.render ? col.render(row) : String(row[col.key] ?? "-")}
+                </td>
               ))}
             </tr>
-          </thead>
-          <tbody>
-            {sortedRows.map((row) => (
-              <tr key={row.id} className="border-b border-[var(--color-border)] last:border-b-0">
-                {columns.map((column) => (
-                  <td key={String(column.key)} className="px-4 py-4 align-top text-sm">
-                    {column.render ? column.render(row) : String(row[column.key] ?? "-")}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </table>
 
-      <div className="flex items-center justify-between border-t border-[var(--color-border)] px-4 py-3">
-        <p className="text-sm text-[var(--color-muted)]">
-          Page {page} of {totalPages}
-        </p>
-        <div className="flex items-center gap-2">
+      {/* Pagination bar */}
+      <div className="flex items-center justify-between border-t border-[var(--color-border)] px-3 py-1.5 bg-[var(--color-surface-low)]">
+        <span className="text-[10px] text-[var(--color-fg-muted)] font-mono tabular-nums">Page {page} of {totalPages}</span>
+        <div className="flex gap-1">
           <button
             type="button"
-            onClick={() => onPageChange(page - 1)}
             disabled={page <= 1}
-            className="inline-flex items-center gap-2 rounded-2xl border border-[var(--color-border)] px-3 py-2 text-sm disabled:opacity-50"
+            onClick={() => onPageChange(page - 1)}
+            className="btn-sq btn-sq-muted px-2.5 py-1 disabled:opacity-30 text-[10px]"
           >
-            <ChevronLeft className="h-4 w-4" />
-            Prev
+            <ChevronLeft className="h-[10px] w-[10px]" /> Prev
           </button>
           <button
             type="button"
-            onClick={() => onPageChange(page + 1)}
             disabled={page >= totalPages}
-            className="inline-flex items-center gap-2 rounded-2xl border border-[var(--color-border)] px-3 py-2 text-sm disabled:opacity-50"
+            onClick={() => onPageChange(page + 1)}
+            className="btn-sq btn-sq-muted px-2.5 py-1 disabled:opacity-30 text-[10px]"
           >
-            Next
-            <ChevronRight className="h-4 w-4" />
+            Next <ChevronRight className="h-[10px] w-[10px]" />
           </button>
         </div>
       </div>
