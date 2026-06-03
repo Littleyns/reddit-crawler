@@ -1,6 +1,7 @@
 package com.redditcrawler.api.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.redditcrawler.api.security.UserService;
 import com.redditcrawler.api.service.CrawlJobStore;
 import com.redditcrawler.api.service.NicheScorer;
 import com.redditcrawler.api.service.RedditCrawlerService;
@@ -10,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.test.context.support.WithMockUser;
@@ -29,6 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest({CrawlerController.class, NicheScoreController.class})
 @AutoConfigureMockMvc(addFilters = false)  // Disable Spring Security filter chain in tests
+@TestPropertySource(properties = {"app.jwt.secret=test-secret-key-for-testing-only-must-be-256-bits"})
 class CrawlerControllerUnitTest {
 
     @Autowired
@@ -45,6 +48,9 @@ class CrawlerControllerUnitTest {
 
     @MockBean
     private CrawlJobStore crawlJobStore;
+
+    @MockBean
+    private UserService userService;
 
     @Test
     @DisplayName("POST /api/crawler/start rejects missing subreddit")

@@ -27,10 +27,12 @@ spring:
 server:
   port: 8080
 
-jwt:
-  secret: ${JWT_SECRET:your-secret-key-need-to-be-at-least-256-bits-in-production}
-  expiration-ms: 86400000 # 24 hours
-  refresh-expiration-ms: 604800000 # 7 days
+# --- JWT Config (dev defaults; override via env in prod) ---
+app:
+  jwt:
+    secret: ${JWT_SECRET:change-this-to-a-256-bit-random-key-in-production}
+    expiration-ms: 86400000     # 24h access token  
+    refresh-expiration-ms: 604800000   # 7d refresh token
 
 logging:
   level:
