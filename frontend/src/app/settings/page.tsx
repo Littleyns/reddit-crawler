@@ -10,20 +10,23 @@ import { ApiKeyInput } from "@/components/api-key-input";
 import { AuthForm } from "@/components/auth-form";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useSaveSettings, useSettings } from "@/hooks/use-reddit-crawler";
-import type { SettingsPayload } from "@/lib/types";
+import type { UserSummary, SettingsPayload } from "@/lib/types";
 
-// Use z.preprocess to ensure input→number coercion produces number at output type level.
-// The schema validates and outputs numbers; default values come from API (SettingsPayload).
 const formSchema = z.object({
   apiKey: z.string().min(8, "API key is required"),
   defaultSubreddit: z.string().min(2),
-  defaultDepth: z.preprocess((val) => (typeof val === "string" || typeof val === "number" ? Number(val) : NaN), z.number().positive()),
-  defaultLimit: z.preprocess((val) => (typeof val === "string" || typeof val === "number" ? Number(val) : NaN), z.number().min(10)),
+  defaultDepth: z.number(),
+  defaultLimit: z.number(),
   autoExport: z.boolean(),
   exportFormat: z.enum(["csv", "json"]),
-  sessionTimeoutMinutes: z.preprocess((val) => (typeof val === "string" || typeof val === "number" ? Number(val) : NaN), z.number().positive()),
-  users: z.array(z.object({ id: z.string(), name: z.string(), email: z.string().email(), role: z.enum(["admin", "analyst", "viewer"]) })).default([]),
-).default({});
+  sessionTimeoutMinutes: z.number(),
+  users: z.array(z.object({ id: z.string(), name: z.string(), email: z.string().email(), role: z.enum(["admin", "analyst", "viewer"]) })),
+});
+
+// Helper to coerce the zod output (strings from HTML inputs) into SettingsPayload
+function toPayload(data: z.output<typeof formSchema>): SettingsPayload {
+  return data as unknown as SettingsPayload;
+}
 
 const tabDefs = [
   { key: "credentials" as const, label: "Credentials & Defaults" },
@@ -45,9 +48,8 @@ export default function SettingsPage() {
     users: [],
   } as SettingsPayload);
 
-  // Use explicit input typing since Zod output (numbers) differs from DOM inputs (strings mixed).
-  // Simple approach - no strict generic mismatch
-  const form = useForm<any>({
+  type FormInput = z.infer<typeof formSchema>;
+  const form = useForm<FormInput & { users: UserSummary[] }>({
     resolver: zodResolver(formSchema as any),
     defaultValues: formValues,
   });
@@ -88,7 +90,7 @@ export default function SettingsPage() {
         <section className="panel-sq-dense flex flex-col gap-4 rounded-none overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-mid)] p-3 sm:p-4">
           <span className="section-label block mb-0.5">Credentials & Scrape Defaults</span>
 
-          <form className="flex flex-col gap-4" onSubmit={form.handleSubmit((data) => saveMutation.mutate(data))}>
+          <form className="flex flex-col gap-4" onSubmit={form.handleSubmit((data) => saveMutation.mutate(toPayload(data)))}>
             {/* API Key */}
             <label className="flex flex-col gap-1">
               <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Reddit API Key</span>

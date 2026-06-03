@@ -9,19 +9,26 @@ import { useCrawlerControls, useCrawlerStatus } from "@/hooks/use-reddit-crawler
 import { StatusBadge } from "@/components/ui/status-badge";
 
 const controlSchema = z.object({
-  subreddit: z.string().min(2, "Subreddit is required"),
-  depth: z.preprocess((val) => Number(val), z.number().min(1).max(10)),
-  limit: z.preprocess((val) => Number(val), z.number().min(10).max(1000)),
-  includeComments: z.boolean(),
-  keywords: z.string().optional(),
+  subreddit: z.string(),
+  depth: z.coerce.number(),
+  limit: z.coerce.number(),
+  includeComments: z.boolean().default(true),
+  keywords: z.string().optional().or(z.literal("")),
 });
-type ControlFormInput = z.input<typeof controlSchema>;
+
+type ControlFormInput = {
+  subreddit: string;
+  depth: number;
+  limit: number;
+  includeComments: boolean;
+  keywords?: string;
+};
 
 export function CrawlerControl() {
   const { data: status } = useCrawlerStatus();
   const { startMutation, stopMutation } = useCrawlerControls();
   const form = useForm<ControlFormInput>({
-    resolver: zodResolver(controlSchema),
+    resolver: zodResolver(controlSchema) as any,
     defaultValues: {
       subreddit: status?.config.subreddit ?? "machinelearning",
       depth: status?.config.depth ?? 4,
@@ -32,7 +39,7 @@ export function CrawlerControl() {
   });
 
   useEffect(() => {
-    if (status?.config) form.reset(status.config);
+    if (status?.config) form.reset(status.config as ControlFormInput);
   }, [form, status?.config]);
 
   const starting = startMutation.isPending;
@@ -52,7 +59,20 @@ export function CrawlerControl() {
       </div>
 
       {/* Controls form */}
-      <form className="flex flex-col gap-3" onSubmit={form.handleSubmit((v) => startMutation.mutate(v))}>
+      <form 
+        className="flex flex-col gap-3" 
+        onSubmit={(e) => {
+          e.preventDefault();
+          const data = form.getValues();
+          startMutation.mutate({
+            subreddit: data.subreddit,
+            depth: Number(data.depth),
+            limit: Number(data.limit),
+            includeComments: data.includeComments,
+            keywords: (data.keywords && String(data.keywords).trim() ? String(data.keywords) : undefined),
+          });
+        }}
+      >
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2">
           <label className="xl:col-span-2 flex flex-col gap-1">
             <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Target subreddit</span>
