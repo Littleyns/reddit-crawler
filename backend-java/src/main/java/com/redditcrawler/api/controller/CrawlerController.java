@@ -1,6 +1,7 @@
 package com.redditcrawler.api.controller;
 
 import com.redditcrawler.api.service.RedditCrawlerService;
+import com.redditcrawler.api.service.RedditCrawlerService.PostDTO;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * REST controller for crawl job lifecycle operations.
@@ -96,5 +98,79 @@ public class CrawlerController {
                 "status", "CANCELLED",
                 "message", "Crawler job stopped"
         ));
+    }
+
+    // ------------------------------------------------------------------
+    // GET /api/crawler/status  — frontend-facing active-status helper
+    // ------------------------------------------------------------------
+    @GetMapping("/status")
+    public ResponseEntity<Map<String, Object>> getStatus() {
+        List<Map<String, Object>> jobs = crawlerService.getAllJobs();
+
+        Optional<Map<String, Object>> runningJob = jobs.stream()
+                .filter(j -> "RUNNING".equals(String.valueOf(j.get("status"))))
+                .findFirst();
+
+        if (runningJob.isPresent()) {
+            Map<String, Object> job = runningJob.get();
+            String jobId = String.valueOf(job.get("jobId"));
+            Optional<PostDTO> posts = getFirstPostDTO((List<Map<String, Object>>) job.get("resultsJson"));
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.putAll(job);
+            response.put("posts", posts.map(List::of).orElse(List.of()));
+            return ResponseEntity.ok(response);
+        }
+
+        // No active job — return empty idle state (frontend expects this shape)
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("jobId", (String) null);
+        response.put("subreddit", "");
+        response.put("status", "IDLE");
+        response.put("progress", 0);
+        response.put("posts", List.<PostDTO>of());
+        return ResponseEntity.ok(response);
+    }
+
+    // ------------------------------------------------------------------
+    // POST /api/crawler/stop  — frontend-facing stop-all helper
+    // ------------------------------------------------------------------
+    @PostMapping("/stop")
+    public ResponseEntity<Map<String, Object>> stopAll() {
+        List<Map<String, Object>> jobs = crawlerService.getAllJobs();
+        long stopped = jobs.stream()
+                .filter(j -> "RUNNING".equals(String.valueOf(j.get("status"))))
+                .map(j -> String.valueOf(j.get("jobId")))
+                .peek(crawlerService::stopCrawl)
+                .count();
+
+        return ResponseEntity.ok(Map.of(
+                "stoppedCount", stopped,
+                "message", stopped > 0 ? (stopped + " crawler(s) stopped") : "No active crawlers to stop"
+        ));
+    }
+
+    private Optional<PostDTO> getFirstPostDTO(List<Map<String, Object>> results) {
+        if (results == null || results.isEmpty()) return Optional.empty();
+        try {
+            PostDTO dto = new PostDTO();
+            Map<String, Object> first = results.get(0);
+            dto.title = asString(first.get("title"));
+            dto.body = asString(first.get("body"));
+            dto.author = asString(first.get("author"));
+            Object u = first.get("upvotes");
+            dto.upvotes = u instanceof Number n ? n.intValue() : 0;
+            Object c = first.get("commentsCount");
+            dto.commentsCount = c instanceof Number n ? n.intValue() : 0;
+            dto.permalink = asString(first.get("permalink"));
+            dto.subreddit = asString(first.get("subreddit"));
+            return Optional.of(dto);
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
+    private String asString(Object o) {
+        return o != null ? String.valueOf(o) : "";
     }
 }
