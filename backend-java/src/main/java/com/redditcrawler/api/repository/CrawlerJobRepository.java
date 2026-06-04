@@ -76,3 +76,6 @@ public interface CrawlerJobRepository extends JpaRepository<CrawlerJob, Long> {
             """, nativeQuery = true)
     List<Object[]> avgJobDurationBySubreddit();
 }
+
+    /** Count jobs with a specific status for a given subreddit. */
+    long countByStatusAndSubreddit(String status, String subreddit);
