@@ -30,6 +30,23 @@ services:
       - all
       - backend
 
+  redis:
+    image: redis:7-alpine
+    container_name: reddit-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - reddit-network
+    profiles:
+      - all
+      - backend
+
   api:
     build:
       context: ./backend-java
@@ -50,6 +67,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        required: true
+      redis:
+        condition: service_started
         required: true
     volumes:
       - ./backend-java/src/main/resources/db:/app/db:ro
