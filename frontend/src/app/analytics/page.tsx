@@ -189,7 +189,7 @@ function KeywordWordCloud() {
         <div className="flex flex-col gap-1.5 h-full overflow-auto">
           {(pieData || []).map((kw, i) => {
             const original = keywords[i];
-            const displayWidth = pieData.length > 0 ? Math.min(original.value / (pieData[0].value || 1), 1) * 100 : 0;
+            const displayWidth = pieData.length > 0 ? Math.min(pieData[i].value / (pieData[0].value || 1), 1) * 100 : 0;
             return (
               <div key={i} className="flex items-center gap-1.5 text-[10px]">
                 {/* Color dot */}
@@ -198,7 +198,7 @@ function KeywordWordCloud() {
                 <span className="truncate font-mono tabular-nums min-w-0 flex-shrink text-[var(--color-fg-secondary)]">{original.keyword}</span>
                 {/* Count + relative bar */}
                 <div className="flex items-end gap-1 shrink-0 w-[60px]">
-                  <span className="tabular-nums text-[9px] text-[var(--color-fg-muted)]">{original.value}</span>
+                  <span className="tabular-nums text-[9px] text-[var(--color-fg-muted)]">{pieData[i].value}</span>
                   <div className="h-1 w-full bg-[var(--color-border)] rounded">
                     <div className="h-full rounded transition-all" style={{ width: `${displayWidth}%`, backgroundColor: pieData[i].color }} />
                   </div>
