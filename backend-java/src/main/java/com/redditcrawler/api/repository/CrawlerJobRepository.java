@@ -14,10 +14,8 @@ import java.util.Map;
 
 public interface CrawlerJobRepository extends JpaRepository<CrawlerJob, Long> {
 
-    @Query("SELECT j FROM CrawlerJob j WHERE j.url LIKE %:urlPattern%")
-    List<CrawlerJob> findByUrlContaining(@Param("urlPattern") String urlPattern);
 
-    @Query("SELECT j FROM CrawlerJob j ORDER BY j.createdAt DESC")
+    @Query("SELECT j FROM CrawlerJob j ORDER BY j.updatedAt DESC")
     Page<CrawlerJob> findRecent(Pageable pageable);
 
     @Query("SELECT j FROM CrawlerJob j WHERE j.subreddit = :subreddit")
