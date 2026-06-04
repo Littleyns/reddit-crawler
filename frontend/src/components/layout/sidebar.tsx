@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Database, Settings as GaugeIcon, PlayCircle, Settings as SettingsIcon } from "lucide-react";
+import { BarChart3, Database, LayoutDashboard, Settings as GaugeIcon, PlayCircle, Settings as SettingsIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: GaugeIcon },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/controls", label: "Controls", icon: PlayCircle },
   { href: "/data", label: "Data", icon: Database },
+  { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
