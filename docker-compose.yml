@@ -57,7 +57,7 @@ services:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/reddit_crawler
       - SPRING_DATASOURCE_USERNAME=postgres
       - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - SPRING_JPA_HIBERNATE_DDLO=validate
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=validate
       - SPRING_SECURITY_ENABLED=true
       - SPRING_DOC_ENABLED=${SPRING_DOC_ENABLED:-true}
     depends_on:
@@ -71,6 +71,46 @@ services:
     profiles:
       - all
       - backend
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: reddit-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://api:8080/api
+      - NODE_ENV=production
+    depends_on:
+      api:
+        condition: service_started
+        required: true
+    restart: unless-stopped
+    profiles:
+      - all
+      - frontend
+
+
+  nginx:
+    image: nginx:alpine
+    container_name: reddit-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api:
+        condition: service_started
+        required: true
+      frontend:
+        condition: service_started
+        required: true
+    restart: unless-stopped
+    profiles:
+      - all
+      - prod
+
 
 volumes:
   postgres_data:
