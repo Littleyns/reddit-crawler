@@ -1,491 +1,373 @@
-"""Data Export Utilities -- Rotation Task B (Part 3)
+"""
+Data Export Utilities -- Rotation Task B Part 3
 
-Export sentiment, keyword and topic analysis results to CSV and Excel formats.
-Supports per-subreddit breakdowns, raw thread lists, aggregated stats, and
-full LDA/KeyBERT outputs as separate sheets or CSV rows.
+Export sentiment/keyword/topic analysis results to CSV and Excel formats.
+Supports per-subreddit breakdowns, raw thread lists, and aggregated stats.
 
 Usage:
-    from visual.export_util import SentimentExporter, KeywordExporter, TopicExporter, BatchExporter
+    from visual.export_util import CSVExporter, ExcelExporter
 
-    # Export sentiment analysis results
-    exporter = SentimentExporter(stats_data)
-    paths = exporter.to_files("/tmp/sentiment_report")   # writes .csv & .xlsx
+    exporter = CSVExporter(stats_data)
+    path = exporter.to_csv("/tmp/sentiment_export.csv")
 
-    # Or combine multiple analyses in one workbook
-    batch = BatchExporter()
-    batch.add("sentiment", sentiment_result)
-    batch.add("keywords",  keybert_result)
-    batch.add("topics",    lda_result)
-    xlsx_path = batch.to_excel("/tmp/full_analysis.xlsx")
+    excel_exp = ExcelExporter(stats_data, sheets=["sentiment", "keywords"])
+    xlsx_path = excel_exp.to_excel("/tmp/analysis_report.xlsx")
 
 Dependencies: pip install pandas openpyxl (Excel format only)
 """
 
-from __future__ import annotations
-
-import csv
-import io
-from dataclasses import asdict, is_dataclass
+from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Any, Optional
-
-
-# --------------------------------------------------------------------------- #
-#  Helpers                                                                    #
-# --------------------------------------------------------------------------- #
-
-def _flatten_row(d: dict | object) -> dict:
-    """Flatten nested dicts/lists into dot-separated keys so each row has flat columns."""
-    out: dict[str, Any] = {}
-    for k, v in (vars(d).items() if is_dataclass(d) else d.items()):
-        key = str(k)
-        if isinstance(v, (dict, object)) and not isinstance(v, (str, int, float, bool)):
-            try:
-                sub = asdict(v) if is_dataclass(v) else _try_dict(v)
-                for sk2, sv2 in sub.items():
-                    out[f"{key}.{sk2}"] = sv2
-            except Exception:
-                out[key] = str(v)
-        elif isinstance(v, (list, tuple)):
-            if len(v) <= 5 and all(not isinstance(item, (dict, list)) for item in v):
-                # Short lists — store semi-colon separated string
-                out[key] = ";".join(str(x) for x in v)
-            else:
-                out[key] = str(v[:20])  # truncate long sequences
-        else:
-            out[key] = v if v is not None else ""
-    return out
-
-
-def _try_dict(o: Any) -> dict | None:
-    try:
-        return o.to_dict() if callable(getattr(o, "to_dict", None)) else vars(o)
-    except Exception:
-        return None
+from typing import Optional, Any
+import csv
 
 
 # --------------------------------------------------------------------------- #
 #  CSV Exporter                                                               #
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------- #
+
+@dataclass
+class CSVExportConfig:
+    """Configuration for CSV export."""
+    delimiter: str = ","        # Column separator (comma, tab, semicolon)
+    encoding: str = "utf-8"     # File encoding
+    include_header: bool = True  # First row = column headers
+    quote_chars: str = '"'      # Character used to enclose values with delimiters
+    date_format: Optional[str] = None  # strftime format for datetime columns
+
 
 class CSVExporter:
-    """Export analysis results to CSV files.
+    """Export analysis results to one or more CSV files."""
 
-    Handles dict and dataclass inputs, flattening nested structures where possible.
-    """
+    def __init__(self, data: dict | list[dict], config: Optional[CSVExportConfig] = None):
+        self.data = data
+        self.config = config or CSVExportConfig()
 
-    def __init__(self) -> None:
-        self._rows: list[dict[str, Any]] = []
-        self._headers: list[str] | None = None
+    # ---- single table export -----------------------------------------------
 
-    # ---- single table -------------------------------------------------------
+    def to_csv(
+        self,
+        file_path: str,
+        table_name: str = "data",
+        **kwargs: Any
+    ) -> Optional[str]:
+        """Write data as a single CSV table.
 
-    def add_rows(self, data: dict | list[dict]) -> "CSVExporter":
-        """Append rows (chainable)."""
-        if isinstance(data, dict):
-            flat = _flatten_row(data)
-            self._rows.append(flat)
-            if self._headers is None:
-                self._headers = list(flat.keys())
-        elif isinstance(data, list):
-            if not data:
-                return self
-            first = data[0]
-            is_dc = is_dataclass(first)
-            flat_items = [asdict(first) if is_dc else _try_dict(first)]
-            keys_set: set[str] = set()
-            for item in flat_items + [first]:
-                for k, v in (vars(item).items() if is_dataclass(item) else (item.items() if isinstance(item, dict) else [])):
-                    keys_set.add(str(k))
-            self._headers = list(keys_set)
-            self._rows.extend([_flatten_row(item) for item in data])
-        return self
-
-    def to_csv(self, file_path: str, delimiter: str = ",") -> Optional[str]:
-        """Write accumulated rows to a CSV file. Creates parent directories automatically."""
-        if not self._rows or not self._headers:
-            return None
-
-        path = Path(file_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(path, "w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=self._headers, delimiter=delimiter, extrasaction="ignore")
-            writer.writeheader()
-            for row in self._rows:
-                writer.writerow({k: row.get(k, "") for k in self._headers})
-
-        return str(path)
-
-
-# --------------------------------------------------------------------------- #
-#  Excel Exporter (multi-sheet)                                               #
-# --------------------------------------------------------------------------- #
-
-class ExcelExporter:
-    """Export to an Excel workbook with multiple sheets.
-
-    Each analysis result maps to one sheet. Auto-flattens dataclasses and dicts.
-    """
-
-    def __init__(self) -> None:
-        self._sheets: dict[str, list[dict]] = {}  # name → list of flat rows
-
-    def add_sheet(self, name: str, data: dict | list[dict]) -> "ExcelExporter":
-        """Queue a sheet. Chainable."""
-        if isinstance(data, dict):
-            self._sheets[name] = [_flatten_row(data)]
-        elif isinstance(data, list) and data:
-            first = data[0]
-            is_dc = is_dataclass(first)
-            self._sheets[name] = [_flatten_row(item) for item in data]
-        return self
-
-    def to_excel(self, file_path: str) -> Optional[str]:
-        """Write all queued sheets to an Excel workbook."""
-        try:
-            import openpyxl     # type: ignore[import-untyped]
-        except ImportError:
-            raise ImportError("openpyxl is required for Excel export.\n    pip install openpyxl")
-
-        from pandas import DataFrame   # type: ignore[import-untyped]
-
-        wb = openpyxl.Workbook()
-        wb.remove(wb.active)  # default sheet not needed
-
-        path = Path(file_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        for sheet_name, rows in self._sheets.items():
-            if not rows:
-                continue
-            safe_name = sheet_name[:31]  # xls has 31-char sheet name limit
-            ws = wb.create_sheet(title=safe_name)
-            if rows:
-                headers = list(rows[0].keys())
-                ws.append(headers)
-                for row in rows:
-                    ws.append([row.get(h, "") for h in headers])
-
-        wb.save(path)
-        return str(path)
-
-
-# --------------------------------------------------------------------------- #
-#  Convenience wrappers                                                       #
-# --------------------------------------------------------------------------- #
-
-class SentimentExporter:
-    """Export sentiment analysis results to CSV + Excel."""
-
-    def __init__(self, stats_data: dict):
-        self.stats_data = stats_data
-
-    def to_files(self, base_path: str = "/tmp/sentiment_export") -> list[str]:
-        """Write per-subreddit CSV files plus a summary Excel workbook.
+        Args:
+            file_path: Output path (e.g., "/tmp/export.csv"). Auto-creates directory.
+            table_name: Logical name for this table within export context (not stored in CSV.)
+            **kwargs: Additional keyword arguments passed to csv.writer constructor.
 
         Returns:
-            List of output file paths.
+            The output file path as a string on success; None on error.
         """
-        output_paths: list[str] = []
+        if not self.data:
+            return None
 
-        # --- CSV: per-subreddit breakdown ----------------------------------
-        per_sub = self.stats_data.get("per_subreddit", {})
-        if not per_sub:
-            return output_paths
+        # Convert nested dict/list-of-dicts format to rows (flat lists) for writing.
+        if isinstance(self.data, dict):
+            headers = list(self.data.keys())
+            rows = [list(self.data.values())]
 
-        csv_exp = CSVExporter()
-        for sub, stats in per_sub.items():
-            flat = _flatten_row(stats)
-            flat["subreddit"] = sub
-            csv_exp.add_rows(flat)
+        elif isinstance(self.data, list):
+            if len(self.data) == 0:
+                return None
 
-        csv_path = f"{base_path}_per_subreddit.csv"
-        if csv_exp.to_csv(csv_path):
-            output_paths.append(csv_path)
+            first_item = self.data[0]
 
-        # --- Excel: summary + per-thread details ---------------------------
-        excel_exp = ExcelExporter()
+            if isinstance(first_item, dict):
+                headers = list(first_item.keys())
+                rows = [list(item.values()) for item in self.data]
 
-        # Summary row
-        for key in ["total_analyzed", "global_mean_vader", "global_positive_pct",
-                     "global_negative_pct", "global_neutral_pct"]:
-            if key in self.stats_data:
-                excel_exp.add_sheet("summary", {key: self.stats_data[key]})
+            elif isinstance(first_item, (list, tuple)):
+                headers = [f"Col_{i+1}" for i in range(len(first_item))]
+                rows = [list(item) for item in self.data]
 
-        per_thread = self.stats_data.get("per_subreddit")  # placeholder access pattern
-        # Export the full stats dict as a single-row sheet for reference
-        excel_exp.add_sheet("full_stats", _flatten_row(self.stats_data))
-
-        xlsx_path = f"{base_path}.xlsx"
-        ep = excel_exp.to_excel(xlsx_path)
-        if ep:
-            output_paths.append(ep)
-
-        return output_paths
-
-
-class KeywordExporter:
-    """Export keyword / phrase extraction results.
-
-    Handles TFIDFResult, KeyBERTResult, or plain dict with 'per_subreddit' + 'global_themes'.
-    """
-
-    def __init__(self, result: Any):
-        self.result = result
-
-    def to_csv(self, file_path: str) -> Optional[str]:
-        csv_exp = CSVExporter()
-        per_sub = {}
-        global_kw = []
-
-        # Handle dataclass or dict input
-        if hasattr(self.result, "per_subreddit"):  # dataclass with to_dict or asdict attr
-            result_dict = self.result.to_dict() if hasattr(self.result, "to_dict") else vars(self.result)
+            else:
+                # Fallback: treat as generic list
+                headers = ["value"]
+                rows = [[item] for item in self.data]
         else:
-            result_dict = dict(self.result)
+            return None
 
-        per_sub = {k: v for k, v in result_dict.get("per_subreddit", {}).items()}
-        global_kw = result_dict.get("global_themes", []) or result_dict.get("global_keywords", [])
+        # Write the file
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, "w", encoding=self.config.encoding, newline="") as f:
+            writer = csv.writer(
+                f,
+                delimiter=self.config.delimiter,
+                quotechar=self.config.quote_chars,
+                **kwargs,
+            )
+            if self.config.include_header:
+                writer.writerow(headers)
+            for row in rows:
+                writer.writerow(row)
 
-        for sub, data in per_sub.items():
-            themes_list = []
-            if isinstance(data, dict):
-                for theme_name, theme_data in data.items():
-                    if isinstance(theme_data, list):
-                        for item in theme_data:
-                            flat = _flatten_row(item)
-                            flat["subreddit"] = sub
-                            flat["theme_name"] = theme_name
-                            themes_list.append(flat)
-            elif hasattr(data, "themes"):  # SubredditThemes dataclass
-                for t in data.themes:
-                    flat = _flatten_row(t)
-                    flat["subreddit"] = sub
-                    themes_list.append(flat)
+        return file_path
 
-        if global_kw:
-            for kw in global_kw[:50]:
-                flat = _flatten_row(kw)
-                flat["type"] = "global"
-                csv_exp.add_rows(flat)
-
-        # Per-subreddit themes
-        for sub, data in per_sub.items():
-            for item_data in (data.themes if hasattr(data, "themes") else
-                              ([data] if isinstance(data, dict) and "phrase" not in data else [])):
-                pass  # Handled above
-
-        if not csv_exp._rows:
-            # Fallback: export as simple per-subreddit keywords
-            for sub, data in per_sub.items():
-                if hasattr(data, "themes"):
-                    themes_list = data.themes
-                elif isinstance(data, dict) and "themes" in data:
-                    themes_list = data["themes"]
-                else:
-                    continue
-
-                if not isinstance(themes_list, list):
-                    continue
-
-                for theme_idx, theme in enumerate(themes_list):
-                    flat = _flatten_row(theme) if is_dataclass(theme) or hasattr(theme, "to_dict") \
-                        else {k: v for k, v in (theme.items() if isinstance(theme, dict) else [])}  # type: ignore[union-attr]
-                    flat["subreddit"] = sub
-                    flat["rank_in_sub"] = theme_idx + 1
-                    csv_exp.add_rows(flat)
-
-        return csv_exp.to_csv(file_path)
+    def to_json(self, file_path: str) -> Optional[str]:
+        """Export data as a JSON file."""
+        import json
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(self.data, f, indent=2, default=str)
+        return file_path
 
 
-class TopicExporter:
-    """Export LDA topic modeling results."""
+# --------------------------------------------------------------------------- #
+#  Excel Exporter                                                             #
+# ---------------------------------------------------------------------------- #
 
-    def __init__(self, result: Any):
-        self.result = result
+class ExcelExporter:
+    """Export analysis results to multi-sheet Excel .xlsx files."""
 
-    def to_csv(self, file_path: str) -> Optional[str]:
-        csv_exp = CSVExporter()
-        if hasattr(self.result, "to_dict"):
-            rdict = self.result.to_dict()   # type: ignore[union-attr]
-        elif isinstance(self.result, dict):
-            rdict = self.result
-        else:
-            rdict = vars(self.result)  # type: ignore[arg-type]
+    def __init__(self):
+        self._sheets: dict[str, Any] = {}
 
-        # Topic definitions as rows
-        for tid, terms in (rdict.get("topics_per_topic") or {}).items():
-            term_strs = []
-            for t_idx, (term, weight) in enumerate(terms[:10]):
-                flat_line = {f"topic_{tid}.term_{t_idx}": term}
-                flat_line[f"topic_{tid}.weight_{t_idx}"] = weight
-                csv_exp.add_rows(flat_line)
-
-        # Topic-subreddit breakdown
-        bd = rdict.get("topic_subreddit_breakdown") or {}
-        for tid, subs in (bd or {}).items():
-            sub_data: dict[str, Any] = {"topic_id": tid}
-            for sub, avg_prob in subs.items():
-                sub_data[f"subreddit:{sub}"] = avg_prob
-            csv_exp.add_rows(sub_data)
-
-        # Document-level distributions
-        docs = rdict.get("document_distributions") or []
-        n_topics = rdict.get("n_topics_modelled", 5)
-        for doc in docs[:200]:
-            flat = _flatten_row(doc) if is_dataclass(doc) \
-                else {k: v for k, v in (doc.items() if isinstance(doc, dict) else [])}  # type: ignore[union-attr]
-            csv_exp.add_rows(flat)
-
-        # Model metadata as summary row
-        meta_keys = ["n_topics_modelled", "coherence_score", "perplexity", "optimal_n_topics"]
-        meta_row: dict[str, Any] = {}
-        for k in meta_keys:
-            if k in rdict:
-                meta_row[k] = rdict[k]  # type: ignore[literal-required]
-        if meta_row:
-            csv_exp.add_rows(meta_row)
-
-        return csv_exp.to_csv(file_path)
-
-
-class BatchExporter:
-    """Combine multiple analysis results into a single Excel workbook."""
-
-    def __init__(self) -> None:
-        self._excel = ExcelExporter()
-
-    def add(self, name: str, data: Any, as_list: bool = True) -> "BatchExporter":
-        """Add a named sheet. Set `as_list=False` for single-row dicts."""
-        if is_dataclass(data):
-            list_ = [data] if hasattr(data, "thread_sentiments") else [data]  # type: ignore[unreachable]
-            self._excel.add_sheet(name, list_)
-        elif as_list:
-            if isinstance(data, (list, tuple)):
-                self._excel.add_sheet(name, list(data))
-            elif is_dataclass(data):
-                self._excel.add_sheet(name, [data])
-        else:
-            if isinstance(data, dict):
-                self._excel.add_sheet(name, data)
+    def add_sheet(self, name: str, data: dict | list[dict]) -> "ExcelExporter":
+        """Register a sheet and its data. Returns self for chaining."""
+        self._sheets[name] = data
         return self
 
-    def to_excel(self, file_path: str) -> Optional[str]:
-        return self._excel.to_excel(file_path)
+    def to_excel(
+        self,
+        file_path: str,
+    ) -> Optional[str]:
+        """Write all registered sheets to an .xlsx file.
+
+        Requires: pip install openpyxl
+        """
+        if not self._sheets:
+            return None
+
+        try:
+            import pandas as pd  # type: ignore[import-untyped]
+        except ImportError:
+            raise ImportError("pandas is required for Excel export.\n    pip install pandas openpyxl")
+
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+
+        with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
+            for sheet_name, data in self._sheets.items():
+                df = pd.DataFrame(data) if isinstance(data, list) else pd.DataFrame([data])
+                df.to_excel(writer, sheet_name=sheet_name[:31], index=False)  # Excel caps sheet names at 31
+        return file_path
+
+
+# --------------------------------------------------------------------------- #
+#  Unified Analyst Report Generator                                           #
+# ---------------------------------------------------------------------------- #
+
+@dataclass
+class AnalyticsReport:
+    """Consolidated analytics report combining sentiment, keyword, and topic outputs."""
+    title: str = "Reddit Analytics Report"
+    generated_at: Optional[str] = None  # f-string set at runtime
+    sentiment_data: Optional[dict] = None
+    keywords_data: Optional[dict] = None  # TF-IDF + KeyBERT output dict
+    topics_data: Optional[dict] = None    # LDA output dict
+    export_dir: str = "/tmp/"
+
+    def save(
+        self,
+        base_name: str = "analysis_report",
+        as_csv: bool = True,
+        as_excel: bool = False,
+        as_json: bool = True,
+    ) -> list[str]:
+        """Save the report to disk in requested formats.
+
+        Returns a list of generated file paths.
+        """
+        import datetime
+        self.generated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self.title += f" ({self.generated_at[:10]})"
+
+        generated_paths: list[str] = []
+
+        # ── Sentiment per-subreddit CSV ──
+        if as_csv and self.sentiment_data:
+            exp = CSVExporter(self.sentiment_data)
+            for sub_name, stats in self.sentiment_data.items():
+                path = f"{self.export_dir}{base_name}_sentiment_{sub_name}.csv"
+                if path not in generated_paths:
+                    exp2 = CSVExporter([stats])  # single-row dict → one-row CSV
+                    r = exp2.to_csv(path)
+                    if r and r not in generated_paths:
+                        generated_paths.append(r)
+
+        # ── Overall summary JSON ──
+        if as_json and self.sentiment_data:
+            import json
+            report_dict = {
+                "title": self.title,
+                "generated_at": self.generated_at,
+                "summary": {
+                    k: v for k, v in self.sentiment_data.items()
+                    if k not in ("per_subreddit", "threads") and isinstance(v, (int, float, str))
+                },
+            }
+            path = f"{self.export_dir}{base_name}_summary.json"
+            generated_paths.append(expose_to_json(report_dict, path))
+
+        # ── Per-thread CSV ──
+        if as_csv and self.sentiment_data and "threads" in self.sentiment_data:
+            threads = self.sentiment_data["threads"]  # list of ThreadSentiment dicts
+            file_list_path = f"{self.export_dir}{base_name}_sentiment_threads.csv"
+            if not Path(file_list_path).exists() or True:
+                exp_threads = CSVExporter(threads)
+                r = exp_threads.to_csv(file_list_path)
+                if r and r not in generated_paths:
+                    generated_paths.append(r)
+
+        # ── Excel (if requested) ──
+        if as_excel:
+            xlsx_exp = ExcelExporter()
+
+            if self.sentiment_data:
+                # Flatten per-subreddit sentiment for one sheet
+                sent_records: list[dict] = []
+                for sub_name, stats in self.sentiment_data.items():
+                    sent_records.append({**self._flatten(stats), "subreddit": sub_name} if isinstance(stats, dict) else {"_raw": str(stats)})
+                if sent_records:
+                    xlsx_exp.add_sheet("Sentiment", sent_records)
+
+            if self.keywords_data and "per_subreddit" in self.keywords_data:
+                kw_records: list[dict] = []
+                for sub_name, kdata in self.keywords_data["per_subreddit"].items():
+                    key_list = kdata.get("keywords", []) if isinstance(kdata, dict) else []
+                    # Take top keyword only for compact view
+                    top_kw = key_list[0] if isinstance(key_list, list) and key_list else ("", 0.0)
+                    kw_records.append({
+                        "subreddit": sub_name,
+                        "top_keyword": top_kw[0] if isinstance(top_kw, (list, tuple)) else str(top_kw),
+                        "score": top_kw[1] if isinstance(top_kw, (list, tuple)) and len(top_kw) > 1 else str(top_kw),
+                    })
+                if kw_records:
+                    xlsx_exp.add_sheet("Keywords", kw_records)
+
+            if self.topics_data:
+                topic_records: list[dict] = []
+                for tid, terms in self.topics_data.get("topics_per_topic", {}).items():
+                    label = self.topics_data.get("topic_labels", {}).get(tid, f"Topic_{tid}")
+                    # Pick top-5 terms as a string field
+                    top_terms_str = " | ".join(f"{t} ({w:.3f})" for t, w in terms[:5]) if isinstance(terms, list) else ""
+                    topic_records.append({
+                        "topic_id": tid,
+                        "label": label,
+                        "top_terms": top_terms_str,
+                    })
+                if topic_records:
+                    xlsx_exp.add_sheet("Topics", topic_records)
+
+            if xlsx_exp._sheets:
+                xls_path = f"{self.export_dir}{base_name}.xlsx"
+                r = xlsx_exp.to_excel(xls_path)
+                if r and r not in generated_paths:
+                    generated_paths.append(r)
+
+        return generated_paths
+
+    @staticmethod
+    def _flatten(d: dict) -> dict:
+        """Flatten a nested dict into one-level (strings only)."""
+        flat = {}
+        for k, v in d.items():
+            if isinstance(v, dict):
+                flat[k] = str({k2: str(v2) for k2, v2 in v.items()})
+            else:
+                flat[k] = str(v)
+        return flat
+
+
+def expose_to_json(data: Any, path: str) -> str:
+    """Write any serializable data to a JSON file."""
+    import json
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, default=str)
+    return path
 
 
 # --------------------------------------------------------------------------- #
 #  Demo                                                                       #
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------- #
 
-def run_example() -> None:
-    """Generate sample export files from synthetic data."""
+def run_example():
+    """Demo: generate an analytics report from sample data."""
     print("=" * 60)
-    print("   Data Export Utilities - Demo")
+    print("   Analytics Report Generator - Demo")
     print("=" * 60)
 
-    # Synthetic sentiment stats
-    synthetic_stats = {
-        "total_analyzed": 15,
-        "global_mean_vader": 0.24,
-        "global_positive_pct": 53.33,
-        "global_negative_pct": 20.0,
-        "global_neutral_pct": 26.67,
-        "per_subreddit": {
-            "python":     {"mean_vader_compound": 0.4, "positive_count": 8,  "negative_count": 3,  "neutral_count": 2, "n_threads": 13},
-            "datascience":{"mean_vader_compound": -0.1, "positive_count": 4,  "negative_count": 5,  "neutral_count": 1, "n_threads": 6},
-        },
-    }
-
-    csv_exp = CSVExporter()
-    for sub, stats in synthetic_stats["per_subreddit"].items():
-        flat = {"subreddit": sub}
-        flat.update({k: v for k, v in stats.items() if isinstance(v, (int, float))})
-        csv_exp.add_rows(flat)
-
-    csv_out = csv_exp.to_csv("/tmp/demo_sentiment_export.csv")
-    print(f"\n✓ CSV output: {csv_out}")
-
-    # Print CSV content for demo
-    if csv_out and Path(csv_out).exists():
-        with open(csv_out) as fh:
-            print(fh.read())
-
-    # Synthetic KeyBERT-style result (plain dict)
-    synthetic_keywords = {
+    # Sample sentiment output (simulating SentimentResult.to_dict())
+    sample_sentiment = {
+        "backend": "vader",
+        "threshold": 0.1,
+        "total_analyzed": 10,
         "per_subreddit": {
             "python": {
-                "themes": [
-                    {"phrase": "type hints",          "score": 0.85, "document_count": 5},
-                    {"phrase": "asyncio performance", "score": 0.72, "document_count": 3},
-                    {"phrase": "dataclasses inheritance", "score": 0.61, "document_count": 2},
-                ],
+                "mean_score": 0.1627,
+                "positive_count": 2,
+                "neutral_count": 0,
+                "negative_count": 1,
+                "median_score": 0.3,
+                "std_score": 0.85,
+            },
+            "datascience": {
+                "mean_score": 0.1338,
+                "positive_count": 2,
+                "neutral_count": 0,
+                "negative_count": 1,
+                "median_score": -0.2,
+                "std_score": 0.45,
             },
         },
-        "global_themes": [
-            {"phrase": "machine learning",      "score": 0.95, "document_count": 45},
-            {"phrase": "feature engineering",   "score": 0.82, "document_count": 32},
-            {"phrase": "transformers fine-tuning", "score": 0.78, "document_count": 28},
-        ],
     }
 
-    kw_csv_out = KeywordExporter(synthetic_keywords).to_csv("/tmp/demo_keywords_export.csv")
-    print(f"✓ Keywords CSV: {kw_csv_out}")
+    sample_keywords = {
+        "per_subreddit": {
+            "python": {"keywords": [("type hints", 0.85), ("dataclasses", 0.72)]},
+        },
+        "global_keywords": [("transformers", 0.91), ("deep learning", 0.83)],
+    }
 
-    # Synthetic LDA-like result (plain dict)
-    synthetic_topics = {
+    sample_topics = {
         "n_topics_modelled": 3,
-        "coherence_score": 0.5421,
-        "perplexity": 892.4,
-        "optimal_n_topics": 3,
+        "coherence_score": 0.42,
+        "perplexity": -0.67,
+        "topic_labels": {0: "Python / Type Hints / Dataclasses", 1: "ML / Feature Engineering", 2: "React / Performance"},
         "topics_per_topic": {
-            0: [("machine", 0.35), ("learning", 0.28), ("training", 0.21)],
-            1: [("python", 0.31), ("asyncio", 0.24), ("dataclasses", 0.19)],
-            2: [("react", 0.29), ("components", 0.23), ("performance", 0.17)],
+            0: [("python", 0.34), ("typehints", 0.28), ("mypy", 0.21)],
+            1: [("featureengineering", 0.31), ("transformers", 0.27), ("xgboost", 0.19)],
+            2: [("reactquery", 0.35), ("swr", 0.29), ("performance", 0.22)],
         },
-        "topic_subreddit_breakdown": {
-            0: {"machinelearning": 0.45, "datascience": 0.38},
-            1: {"python": 0.62, "datascience": 0.15},
-            2: {"reactjs": 0.71, "javascript": 0.22},
-        },
-        "document_distributions": [
-            {"doc_id": "t1", "subreddit": "machinelearning", "dominant_topic": 0, "confidence": 0.68},
-            {"doc_id": "t2", "subreddit": "python",          "dominant_topic": 1, "confidence": 0.74},
-            {"doc_id": "t3", "subreddit": "reactjs",        "dominant_topic": 2, "confidence": 0.59},
-        ],
     }
 
-    topic_csv_out = TopicExporter(synthetic_topics).to_csv("/tmp/demo_topics_export.csv")
-    print(f"✓ Topics CSV: {topic_csv_out}")
+    report = AnalyticsReport(
+        title="Reddit Content Analytics Report",
+        sentiment_data=sample_sentiment,
+        keywords_data=sample_keywords,
+        topics_data=sample_topics,
+        export_dir="/tmp/",
+    )
 
-    # Batch export to Excel
-    batch = BatchExporter()
-    batch.add("sentiment_summary", synthetic_stats, as_list=False)
-    batch.add("keywords_global", synthetic_keywords.get("global_themes", []))
+    paths = report.save("reddit_report", as_csv=True, as_excel=False, as_json=True)
 
-    for sub, data in synthetic_keywords.get("per_subreddit", {}).items():
-        themes = data.get("themes", []) if isinstance(data, dict) else getattr(data, "themes", []) or []
-        batch.add(f"keywords_{sub}", themes, as_list=True)  # type: ignore[arg-type]
+    print(f"\\nGenerated {len(paths)} file(s):")
+    for p in paths:
+        path_path = Path(p)
+        size = path_path.stat().st_size if path_path.exists() else 0
+        print(f"  ✅ {p}  ({size:,} bytes)")
 
-    for tid_str, terms in synthetic_topics.get("topics_per_topic", {}).items():
-        row_data = {"topic_id": int(tid_str), "terms": ";".join(t[0] for t in terms)}  # type: ignore[union-attr]
-        batch.add(f"topic_{tid_str}", {k: v for k, v in [("topic_id", tid_str)]}, as_list=False)  # type: ignore[arg-type]
-    batch.add("topic_breakdown", synthetic_topics.get("topic_subreddit_breakdown") or {}, as_list=False)
-
-    xlsx_out = batch.to_excel("/tmp/demo_full_analysis.xlsx")
-    print(f"✓ Full workbook (Excel): {xlsx_out}")
-
-    # Verify Excel sheets
-    if xlsx_out and Path(xlsx_out).exists():
-        import openpyxl
-        wb = openpyxl.load_workbook(xlsx_out)
-        print(f"\n  Sheet names: {wb.sheetnames}")
-        for ws_name in wb.sheetnames:
-            ws = wb[ws_name]
-            print(f"    - {ws_name}: {ws.max_row} rows x {ws.max_column} cols")
-
-    print("\n✓ Demo complete. Check /tmp/demo_* files.")
+    # Print summary
+    print("\\n📊 Report Summary:")
+    print(f"   Title: {report.title}")
+    print(f"   Generated: {report.generated_at}")
+    print(f"   Sentiment subreddits: {list(report.sentiment_data.get('per_subreddit', {}).keys()) if report.sentiment_data else 'none'}")
+    print(f"   Keywords subreddits: {list(report.keywords_data.get('per_subreddit', {}).keys()) if report.keywords_data else 'none'}")
+    if report.topics_data:
+        print(f"   Topics modelled: {report.topics_data.get('n_topics_modelled')}")
 
 
 if __name__ == "__main__":
