@@ -212,4 +212,4 @@ export const PROVIDER_DEFAULT_MODELS = {
     "deepseek-ai/DeepSeek-V3",
     "mistralai/Mixtral-8x7B-Instruct-v0.1",
   ],
-};
+} as const satisfies Record<string, readonly string[]>;
