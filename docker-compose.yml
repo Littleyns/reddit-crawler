@@ -89,6 +89,8 @@ services:
         condition: service_started
         required: true
     restart: unless-stopped
+    networks:
+      - reddit-network
     profiles:
       - all
       - frontend
