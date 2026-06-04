@@ -30,8 +30,7 @@ public interface CrawlerJobRepository extends JpaRepository<CrawlerJob, Long> {
 
     long countByStatus(String status);
 
-    @Query("SELECT COALESCE(subreddit,'N/A') as subreddit, COUNT(*)::bigint as cnt "
-        + "FROM crawler_jobs WHERE status IN ('COMPLETED','SUCCESS') GROUP BY subreddit")
+    @Query(value = "SELECT COALESCE(subreddit,'N/A') as subreddit, COUNT(*)::bigint as cnt FROM crawler_jobs WHERE status IN ('COMPLETED','SUCCESS') GROUP BY subreddit", nativeQuery = true)
     List<Object[]> successFailureCounts();
 
     @Query(value = "SELECT COALESCE(subreddit,'N/A') AS subreddit, COUNT(*) as cnt "
