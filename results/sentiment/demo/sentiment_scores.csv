@@ -1,0 +1,4 @@
+thread_id,subreddit,polarity_label,overall_compound,title_compound,title_pos,title_neg,body_compound,comment_count,avg_comment_compound
+demo_001,Python,positive,0.502,0.8395,0.533,0.0,0.5974,3,0.3577
+demo_002,MachineLearning,positive,0.2451,0.0,0.0,0.0,0.6597,3,0.1886
+demo_003,datascience,positive,0.5745,0.7096,0.396,0.0,0.0,2,0.7941
