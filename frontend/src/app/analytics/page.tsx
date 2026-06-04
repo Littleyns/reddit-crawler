@@ -82,27 +82,53 @@ function SentimentChart() {
 
   const chartData = heatmap.map((h) => ({
     subreddit: h.subreddit,
-    positive: h.positive || 0,
-    neutral: h.neutral || 0,
-    negative: h.negative || 0,
+    positive: h.positivePercent || 0,
+    neutral: h.neutralPercent || 0,
+    negative: h.negativePercent || 0,
+    positiveCount: h.positive || 0,
+    neutralCount: h.neutral || 0,
+    negativeCount: h.negative || 0,
+    total: h.total || 0,
   }));
+
+  const customTooltip = ({ active, payload }: any) => {
+    if (!active || !payload?.[0]) return null;
+    const item = payload[0].payload as typeof chartData[0];
+    return (
+      <div className="panel-sq-dense p-3 text-xs border border-[var(--color-border)] bg-[var(--color-bg-base)] shadow-lg">
+        <p className="font-semibold mb-1">{item.subreddit}</p>
+        <div className="flex flex-col gap-0.5 font-mono tabular-nums">
+          <span className="text-[#22c55e]">▲ Pos</span>
+          <span>{item.positiveCount}/{item.total} ({item.positive.toFixed(1)}%)</span>
+        </div>
+        <div className="flex flex-col gap-0.5 font-mono tabular-nums">
+          <span className="text-[#a1a1aa]">● Neu</span>
+          <span>{item.neutralCount}/{item.total} ({item.neutral.toFixed(1)}%)</span>
+        </div>
+        <div className="flex flex-col gap-0.5 font-mono tabular-nums border-t border-[var(--color-border)] mt-1 pt-1">
+          <span className="text-[#ef4444]">▼ Neg</span>
+          <span>{item.negativeCount}/{item.total} ({item.negative.toFixed(1)}%)</span>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="panel-sq-dense p-4 flex flex-col gap-3">
-      <SectionHeader icon={Database} title="Sentiment Distribution" />
+      <div className="flex items-center justify-between">
+        <SectionHeader icon={Database} title="Sentiment Distribution (% of total)" />
+        <span className="text-[9px] text-[var(--color-fg-muted)]">Stacked to 100%</span>
+      </div>
       <ResponsiveContainer width="100%" height={320}>
         <BarChart data={chartData} barGap={0}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
           <XAxis dataKey="subreddit" tick={{ fontSize: 10, fill: "var(--color-fg-muted)" }} axisLine={{ stroke: "var(--color-border)" }} tickLine={false} />
-          <YAxis tick={{ fontSize: 10, fill: "var(--color-fg-muted)" }} axisLine={false} tickLine={false} />
-          <RechartsTooltip
-            contentStyle={{ backgroundColor: "var(--color-surface-high)", border: "1px solid var(--color-border)", borderRadius: 0, color: "var(--color-fg-primary)", fontSize: 12 }}
-            itemStyle={{ color: "var(--color-fg-primary)" }}
-          />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
-          <Bar dataKey="positive" stackId="sentiment" fill={HEATMAP_COLORS[0]} name="Positive" />
-          <Bar dataKey="neutral" stackId="sentiment" fill={HEATMAP_COLORS[1]} name="Neutral" />
-          <Bar dataKey="negative" stackId="sentiment" fill={HEATMAP_COLORS[2]} name="Negative" />
+          <YAxis tick={{ fontSize: 10, fill: "var(--color-fg-muted)" }} axisLine={false} tickLine={false} domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} />
+          <RechartsTooltip content={customTooltip} />
+          <Legend wrapperStyle={{ fontSize: 11 }} formatter={() => null} />
+          <Bar dataKey="positive" stackId="sentiment" fill="#22c55e" name="Positive" />
+          <Bar dataKey="neutral" stackId="sentiment" fill="#a1a1aa" name="Neutral" />
+          <Bar dataKey="negative" stackId="sentiment" fill="#ef4444" name="Negative" />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -160,17 +186,26 @@ function KeywordWordCloud() {
         </ResponsiveContainer>
 
         {/* Keyword frequency list (side panel) */}
-        <div className="flex flex-col gap-2 h-full overflow-auto">
-          {(pieData || []).map((kw, i) => (
-            <div key={i} className="flex items-center gap-1.5 text-[10px]">
-              {(kw.name).slice(0, 18)}
-              <span className="ml-auto font-mono tabular-nums">{kw.value}</span>
-              {/* tiny bar */}
-              <div className="h-1 w-full max-w-[60px] bg-[var(--color-border)] mt-[-2px] rounded">
-                <div className="h-full rounded" style={{ width: `${Math.min(kw.value / 50, 1) * 100}%`, backgroundColor: pieData[i].color }} />
+        <div className="flex flex-col gap-1.5 h-full overflow-auto">
+          {(pieData || []).map((kw, i) => {
+            const original = keywords[i];
+            const displayWidth = pieData.length > 0 ? Math.min(original.value / (pieData[0].value || 1), 1) * 100 : 0;
+            return (
+              <div key={i} className="flex items-center gap-1.5 text-[10px]">
+                {/* Color dot */}
+                <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: pieData[i].color }} />
+                {/* Keyword name (full, shown) */}
+                <span className="truncate font-mono tabular-nums min-w-0 flex-shrink text-[var(--color-fg-secondary)]">{original.keyword}</span>
+                {/* Count + relative bar */}
+                <div className="flex items-end gap-1 shrink-0 w-[60px]">
+                  <span className="tabular-nums text-[9px] text-[var(--color-fg-muted)]">{original.value}</span>
+                  <div className="h-1 w-full bg-[var(--color-border)] rounded">
+                    <div className="h-full rounded transition-all" style={{ width: `${displayWidth}%`, backgroundColor: pieData[i].color }} />
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

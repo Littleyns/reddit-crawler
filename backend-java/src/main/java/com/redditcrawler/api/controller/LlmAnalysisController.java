@@ -34,12 +34,13 @@ public class LlmAnalysisController {
     }
 
     /**
-     * GET /api/analysis/ideas
-     * Extracted project ideas (LLM-enhanced or heuristic).
+     * GET /api/analysis/ideas?category=web-dev
+     * Extracted project ideas (LLM-enhanced or heuristic). Optional category filter.
      */
     @GetMapping("/ideas")
-    public ResponseEntity<List<Map<String, Object>>> getIdeas() {
-        return ResponseEntity.ok(textAnalysisService.extractIdeas());
+    public ResponseEntity<List<Map<String, Object>>> getIdeas(
+            @RequestParam(required = false) String category) {
+        return ResponseEntity.ok(textAnalysisService.extractIdeas(category));
     }
 
     /**
