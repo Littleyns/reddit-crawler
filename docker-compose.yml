@@ -10,14 +10,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend-java/src/main/resources/db:/docker-entrypoint-initdb.d:ro
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
     restart: unless-stopped
     logging:
       driver: json-file
@@ -29,12 +21,15 @@ services:
     profiles:
       - all
       - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     container_name: reddit-redis
-    ports:
-      - "6379:6379"
     restart: unless-stopped
     logging:
       driver: json-file
@@ -54,6 +49,8 @@ services:
       args:
         BUILD_ENV: ${BUILD_ENV:-dev}
     container_name: reddit-api
+    ports:
+      - "8080:8080"
     environment:
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-dev}
       - REDIS_HOST=redis
@@ -63,8 +60,6 @@ services:
       - SPRING_JPA_HIBERNATE_DDLO=validate
       - SPRING_SECURITY_ENABLED=true
       - SPRING_DOC_ENABLED=${SPRING_DOC_ENABLED:-true}
-    ports:
-      - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,70 +67,13 @@ services:
       redis:
         condition: service_started
         required: true
-    volumes:
-      - ./backend-java/src/main/resources/db:/app/db:ro
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      - reddit-network
     profiles:
       - all
       - backend
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: /api
-        API_PROXY_TARGET: http://api:8080/api
-    container_name: reddit-frontend
-    environment:
-      - NEXT_PUBLIC_API_URL=/api
-      - API_PROXY_TARGET=http://api:8080/api
-    ports:
-      - "3000:3000"
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      - reddit-network
-
-  frontend-proxy:
-    image: nginx:alpine
-    container_name: reddit-proxy
-    ports:
-      - "80:80"
-    depends_on:
-      - frontend
-      - api
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    restart: unless-stopped
-    profiles:
-      - all
-      - proxy
-    networks:
-      - reddit-network
 
 volumes:
   postgres_data:
-    driver: local
 
 networks:
   reddit-network:
