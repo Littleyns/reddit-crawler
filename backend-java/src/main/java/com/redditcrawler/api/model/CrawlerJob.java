@@ -7,6 +7,7 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 
 /**
  * JPA entity representing the state of a crawling job.
@@ -38,6 +39,9 @@ public class CrawlerJob {
 
     @Column(name = "completed_at")
     private Instant completedAt;
+
+    @Column(name = "updated_at", updatable = false)
+    private LocalDateTime updatedAt;
 
     public CrawlerJob() {
     }

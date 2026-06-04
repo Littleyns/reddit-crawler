@@ -6,88 +6,73 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Set;
+import java.util.Optional;
 
-/**
- * JPA repository for CrawlerJob entities — tracks crawl job states.
- */
-@Repository
-public interface CrawlerJobRepository extends JpaRepository<CrawlerJob, String> {
+public interface CrawlerJobRepository extends JpaRepository<CrawlerJob, Long> {
 
-    // -----------------------------------------------------------------
-    // STATUS-BASED QUERIES
-    // -----------------------------------------------------------------
+    List<CrawlerJob> findByStatus(String status);
 
-    /** Find all jobs in a given status (PENDING, RUNNING, COMPLETED, FAILED). */
-    List<CrawlerJob> findByStatus(@Param("status") String status);
+    Page<CrawlerJob> findByStatus(String status, Pageable pageable);
 
-    /** Paginated jobs ordered by start date descending. */
-    @Query("SELECT j FROM CrawlerJob j WHERE (:subreddit IS NULL OR j.subreddit = :subreddit) " +
-           "ORDER BY j.startedAt DESC")
-    Page<CrawlerJob> findBySubredditOrderedByDate(
-            @Param("subreddit") String subreddit,
-            Pageable pageable);
+    Optional<CrawlerJob> findById(Long id);
 
-    // -----------------------------------------------------------------
-    // ANALYTICS AGGREGATION QUERIES
-    // -----------------------------------------------------------------
+    List<CrawlerJob> findByUrlContaining(String url);
 
-    /** Total number of jobs across all subreddits. */
-    long count();
+    @Query("SELECT j FROM CrawlerJob j WHERE j.updatedAt > :since")
+    List<CrawlerJob> findJobsUpdatedSince(LocalDateTime since);
 
-    /** Count of jobs by subreddit. */
-    @Query("SELECT j.subreddit, COUNT(j) FROM CrawlerJob j GROUP BY j.subreddit " +
-           "ORDER BY COUNT(j) DESC")
-    List<Object[]> countJobsBySubreddit();
+    long countByStatus(String status);
 
-    /** Number of jobs per status (for dashboard summary). */
-    @Query("SELECT j.status, COUNT(j) FROM CrawlerJob j GROUP BY j.status")
-    List<Object[]> countJobsByStatus();
-
-    /** Jobs completed in a date range — trend analysis for activity volume. */
-    @Query("SELECT j.subreddit, COUNT(j) FROM CrawlerJob j " +
-           "WHERE j.completedAt BETWEEN :start AND :end " +
-           "GROUP BY j.subreddit ORDER BY COUNT(j) DESC")
-    List<Object[]> activeSubredditsInDateRange(
-            @Param("start") Instant start,
-            @Param("end") Instant end);
-
-    /** Total successful vs failed crawl jobs. */
-    @Query("SELECT CASE WHEN j.status = 'COMPLETED' THEN 1 ELSE 0 END, COUNT(*) " +
-           "FROM CrawlerJob j GROUP BY CASE WHEN j.status = 'COMPLETED' THEN 1 ELSE 0 END")
+    /** Count of success/failure jobs using JPQL boolean test. */
+    @Query("""
+            SELECT CASE WHEN c.status = 'COMPLETED' THEN 1 ELSE 0 END AS succ,
+                   COUNT(*) FROM CrawlerJob c GROUP BY CASE WHEN c.status = 'COMPLETED' THEN 1 ELSE 0 END
+            """)
     List<Object[]> successFailureCounts();
 
-    /** Average job duration for completed jobs grouped by subreddit. */
-    @Query("SELECT j.subreddit, AVG(CAST(EXTRACT(EPOCH FROM (j.completedAt - j.startedAt)) AS double)) " +
-           "FROM CrawlerJob j WHERE j.status = 'COMPLETED' AND j.startedAt IS NOT NULL " +
-           "AND j.completedAt IS NOT NULL GROUP BY j.subreddit ORDER BY AVG DESC")
-    List<Object[]> avgJobDurationBySubreddit();
+    /** Active subreddits in a date range by recent crawl jobs. */
+    @Query(value = """
+            SELECT DISTINCT tj.subreddit, COUNT(*)
+            FROM crawler_jobs tj
+            WHERE tj.updated_at >= :start AND tj.updated_at <= :end
+            GROUP BY tj.subreddit
+            """, nativeQuery = true)
+    List<Object[]> activeSubredditsInDateRange(@Param("start") Instant start, @Param("end") Instant end);
 
-    /** Jobs that ran within last N hours — used for freshness checks. */
-    @Query("SELECT j FROM CrawlerJob j WHERE j.completedAt > :since ORDER BY j.completedAt DESC")
+    /** Recent completed jobs after a given instant. */
+    @Query("""
+            SELECT j FROM CrawlerJob j
+            WHERE j.completedAt >= :since AND j.status = 'COMPLETED'
+            ORDER BY j.completedAt DESC
+            """)
     List<CrawlerJob> findRecentJobs(@Param("since") Instant since);
 
-    /** Count of completed jobs for a specific subreddit (used in breakdown). */
-    long countByStatusAndSubreddit(String status, String subreddit);
+    /** Count jobs per subreddit with completed status. */
+    @Query(value = """
+            SELECT subreddit, COUNT(*) FROM crawler_jobs
+            WHERE status = 'COMPLETED'
+            GROUP BY subreddit
+            """, nativeQuery = true)
+    List<Object[]> countJobsBySubreddit();
 
-    /** All known subreddits that have been crawled. */
-    @Query("SELECT DISTINCT j.subreddit FROM CrawlerJob j")
-    Set<String> findAllCrawledSubreddits();
+    /** Jobs finished after given instant for the breakdown helper. */
+    @Query("""
+            SELECT j FROM CrawlerJob j WHERE j.completedAt >= :since AND j.status = 'COMPLETED'
+            ORDER BY j.jobId DESC
+            """)
+    List<CrawlerJob> findFinishedAfter(@Param("since") Instant since);
 
-    // -----------------------------------------------------------------
-    // MAINTENANCE QUERIES
-    // -----------------------------------------------------------------
-
-    /** Delete completed jobs older than cutoff for storage cleanup. */
-    @Query("DELETE FROM CrawlerJob j WHERE j.status = 'COMPLETED' AND j.completedAt < :cutoff")
-    long deleteOldCompletedJobs(@Param("cutoff") Instant cutoff);
-
-    /** Jobs still in RUNNING status longer than a threshold (stale job detection). */
-    @Query("SELECT j FROM CrawlerJob j WHERE j.status = 'RUNNING' " +
-           "AND j.startedAt < :threshold ORDER BY j.startedAt ASC")
-    List<CrawlerJob> findStaleJobs(@Param("threshold") Instant threshold);
+    /** Average crawl duration per subreddit in seconds. */
+    @Query(value = """
+            SELECT subreddit, AVG(
+                TIMESTAMPDIFF(SECOND, started_at, completed_at)
+            ) FROM crawler_jobs
+            WHERE status = 'COMPLETED' AND started_at IS NOT NULL AND completed_at IS NOT NULL
+            GROUP BY subreddit
+            """, nativeQuery = true)
+    List<Object[]> avgJobDurationBySubreddit();
 }
