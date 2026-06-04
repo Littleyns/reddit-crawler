@@ -55,36 +55,6 @@ public class SentimentController {
     }
 
     /**
-     * POST /api/llm/sentiment/batch
-     * Analyze multiple texts at once. Accepts { "texts": [...] }.
-     */
-    @PostMapping("/batch")
-    public ResponseEntity<List<Map<String, Object>>> analyzeBatch(
-            @RequestBody(required = true) Map<String, Object> body) {
-        @SuppressWarnings("unchecked")
-        List<String> texts = (java.util.ArrayList<String>) java.util.Collections.unmodifiableList(
-                (java.util.List<String>) body.getOrDefault("texts", java.util.List.of()));
-
-        try {
-            var results = sentimentAnalysisService.analyzeBatch(texts);
-            var response = results.stream().map(r -> {
-                Map<String, Object> m = new java.util.LinkedHashMap<>();
-                m.put("text", r.text() != null ? (r.text().length() > 200 ? r.text().substring(0, 200) + "..." : r.text()) : "");
-                m.put("sentiment", r.score().sentiment());
-                m.put("confidence", r.score().confidence());
-                m.put("positiveCount", r.score().positiveCount());
-                m.put("negativeCount", r.score().negativeCount());
-                return m;
-            }).toList();
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(List.of(
-                    Map.of("error", "Batch analysis failed: " + e.getMessage())
-            ));
-        }
-    }
-
-    /**
      * GET /api/llm/sentiment/summary?text1=foo&text2=bar
      * Quick summary of overall sentiment across queries as params.
      */
