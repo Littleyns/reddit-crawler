@@ -4,11 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useCrawlerStatus } from "@/hooks/use-reddit-crawler";
+import { GlobalStatusIndicator } from "@/components/global-status-indicator";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/controls", label: "Controls" },
   { href: "/data", label: "Data" },
+  { href: "/analytics", label: "Analytics" },
   { href: "/settings", label: "Settings" },
 ];
 
@@ -20,6 +22,7 @@ export function Header() {
     "/dashboard": "Crawler Dashboard",
     "/controls": "Crawler Controls",
     "/data": "Data Explorer",
+    "/analytics": "Analytics Dashboard",
     "/settings": "Settings",
   };
 
