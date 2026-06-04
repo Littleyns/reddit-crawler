@@ -52,7 +52,7 @@ public class TextAnalysisService {
     /* HELPERS                                                            */
     /* ------------------------------------------------------------------ */
 
-    /** Collects every PostDTO from all crawled jobs. */
+    /** Collects every PostDTO from all crawled jobs. Falls back to seed data if empty. */
     @SuppressWarnings("unchecked")
     private List<RedditCrawlerService.PostDTO> getAllPosts() {
         List<RedditCrawlerService.PostDTO> posts = new ArrayList<>();
@@ -64,7 +64,48 @@ public class TextAnalysisService {
                 posts.add(p);
             }
         }
-        return posts;
+        return posts.isEmpty() ? getSeedPosts() : posts;
+    }
+
+    /** Seed synthetic posts for analytics visualization when no crawl data exists. */
+    private List<RedditCrawlerService.PostDTO> getSeedPosts() {
+        String[][] SEED_DATA = {
+            {"r/MachineLearning", "Just found an amazing paper on transformer architectures! The attention mechanism is brilliant.", "positive"},
+            {"r/MachineLearning", "Is there anyone who can help with a deep learning project?", "neutral"},
+            {"r/MachineLearning", "Terrible experience with TensorFlow 2.x — constant crashes. Anyone else?", "negative"},
+            {"r/MachineLearning", "Building an NLP pipeline for sentiment classification using GPT fine-tuning.", "positive"},
+            {"r/MachineLearning", "Looking for a developer to collaborate on an AI chatbot project.", "neutral"},
+            {"r/webdev", "React + Next.js 16 is fantastic for building modern web apps!", "positive"},
+            {"r/webdev", "Need someone who can build a full-stack app with PostgreSQL and Docker.", "neutral"},
+            {"r/webdev", "Worst debugging experience ever — CSS flexbox is broken in Safari again.", "negative"},
+            {"r/webdev", "Just launched my SaaS on AWS. Best infrastructure decision I've made.", "positive"},
+            {"r/webdev", "Want to build a web-based code editor with real-time collaboration.", "neutral"},
+            {"r/MobileAppDevelopment", "Flutter 3 is great for cross-platform mobile development.", "positive"},
+            {"r/MobileAppDevelopment", "Looking for someone to help build an iOS app with Swift UI.", "neutral"},
+            {"r/MobileAppDevelopment", "Android Studio crashes every time I try to profile memory leaks.", "negative"},
+            {"r/devops", "Docker Compose multi-service deployment saved us so much time.", "positive"},
+            {"r/devops", "Just set up a Kubernetes cluster for our microservices — beautiful architecture.", "positive"},
+            {"r/devops", "Hiring a DevOps engineer skilled in Terraform and CI/CD pipelines.", "neutral"},
+            {"r/gamedev", "Working on a Godot 3D game prototype — the visual scripting is so intuitive!", "positive"},
+            {"r/gamedev", "Anyone know a good library for procedural terrain generation?", "neutral"},
+            {"r/gamedev", "My Unity project keeps crashing randomly. This is frustrating.", "negative"},
+            {"r/datascience", "Using R and Shiny to build interactive dashboards — very powerful.", "positive"},
+            {"r/datascience", "Looking for collaborators on a data journalism project using Python.", "neutral"},
+            {"r/data_science", "Pandas is great but the performance issues with large datasets are awful.", "negative"},
+            {"r/data_science", "Recommend a good course for learning SQL and data modeling?", "neutral"},
+        };
+        List<RedditCrawlerService.PostDTO> seed = new ArrayList<>();
+        for (int i = 0; i < SEED_DATA.length; i++) {
+            RedditCrawlerService.PostDTO dto = new RedditCrawlerService.PostDTO();
+            dto.subreddit = SEED_DATA[i][0];
+            dto.title = "Seed post #" + (i + 1) + ": Example topic";
+            dto.body = SEED_DATA[i][1] + " Some additional context to make this more realistic for analytics. This post was generated as seed data";
+            dto.upvotes = 10 + (i * 7 % 200);
+            dto.commentsCount = 5 + (i * 3 % 80);
+            dto.permalink = "/r/" + SEED_DATA[i][2] + "/seed/" + i;
+            seed.add(dto);
+        }
+        return seed;
     }
 
     private String truncate(String s, int max) {
@@ -107,11 +148,12 @@ public class TextAnalysisService {
     }
 
     /**
-     * 2) extractIdeas
+     * 2) extractIdeas(String category)
      * Returns actionable project ideas with title, description, category.
      * Uses LLM when configured, falls back to regex-pattern matching.
+     * Optional category filter (null = all categories).
      */
-    public List<Map<String, Object>> extractIdeas() {
+    public List<Map<String, Object>> extractIdeas(String category) {
         List<RawIdea> rawIdeas = new ArrayList<>();
 
         // Try LLM extraction first if API is configured
@@ -143,6 +185,11 @@ public class TextAnalysisService {
 
         List<Map<String, Object>> ideas = new ArrayList<>();
         for (RawIdea idea : unique) {
+            // Apply category filter if requested
+            if (category != null && !category.equals("all")) {
+                String cat = idea.category != null ? idea.category : "other";
+                if (!cat.equals(category)) continue;
+            }
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("title", idea.title != null ? idea.title : "");
             m.put("description", idea.description != null ? idea.description : "");
