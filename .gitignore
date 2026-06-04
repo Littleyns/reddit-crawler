@@ -3,6 +3,70 @@
 Thumbs.db
 Desktop.ini
 
-# Editor directories
+# Editor directories and files
 .idea/
 .vscode/
+*.swp
+*.swo
+
+# Java / Maven build outputs
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# Spring Boot plugin / JAR
+*.jar
+*.war
+*.ear
+BOOT-INF/
+META-INF/maven/
+org/
+layers.idx
+classpath.idx
+
+# Spring Boot maven plugin folder
+spring-boot-maven-plugins/
+
+# Temp files for testing
+temp_verify/
+*.tmp
+*.bak
+*.log
+
+# Docker build context ignores (for multi-stage)
+.env.*
+!.env.example
+
+# IDE-specific
+eclipse-classes/
+.classpath
+.project
+.settings/
+
+# Python (frontend/data-science artifacts)
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+.env/
+venv/
+.venv/
+
+# Node.js / Frontend build outputs
+frontend/node_modules/
+frontend/.next/
+frontend/build/
+package-lock.json
+
+# Database migrations temp files
+flyway/
+
+# Secrets and credentials
+application-dev.yml
+application-security.yml
+*.pem
+*.key
