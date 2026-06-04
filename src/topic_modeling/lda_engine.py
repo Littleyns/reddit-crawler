@@ -1,462 +1,291 @@
 """
-Topic Modeling Module
+Latent Dirichlet Allocation (LDA) Topic Modeling Module
 
-Rotation Task C: Discover hidden topics in crawled content using Latent Dirichlet Allocation (LDA)
-via gensim's MultiCore LDA. Automatically suggests optimal number of topics.
+Implements a lightweight LDA-style topic discovery pipeline using gensim and scikit-learn.
+Discovers hidden thematic topics in crawled Reddit content.
 
-Usage:
-    >>> from topic_modeling.lda_engine import LDAModeler
-    >>> threads = [
-    ...     {"id": "1", "subreddit": "python", "title": "..."},
-    ...     {"id": "2", "subreddit": "datascience", "title": "..."},
-    ... ]
-    >>> modeler = LDAModeler(n_topics=5, random_state=42)
-    >>> result = modeler.fit(threads)
-    >>> for topic_num, top_terms in result.topics_per_topic.items():
-    ...     print(f"Topic {topic_num}: {', '.join(kw for kw, _ in top_terms)}")
+Dependencies already installed: gensim, sklearn, numpy
 
-Dependencies: `pip install gensim scipy nltk`
+Authors: Hermes Agent — DS Analyst worker
 """
 
-import re
-from dataclasses import dataclass, asdict
-from typing import Optional
-from collections import defaultdict, Counter
+from __future__ import annotations
+
+import logging
+from collections import Counter
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
-from scipy import stats
+from gensim.corpora import Dictionary
+from gensim.models import LdaModel  # type: ignore[import]
+from gensim.parsing.preprocessing import STOPWORDS as GENERICTOPWORDS
+
+logger = logging.getLogger(__name__)
+
+_EXTENSION_STOP_WORDS: Set[str] = set(GENERICTOPWORDS) | {
+    "reddit", "subreddit", "upvote", "upvotes", "downvote", "downvotes",
+    "comment", "comments", "reply", "replies", "thread", "threads",
+    "op", "original", "poster", "suggested", "editing", "edit",
+    "edited", "aww", "oh", "well", "uh", "um", "haha", "hehe", "lol",
+    "lmfao", "lmao", "brb", "irl", "imo", "imho", "tbh", "btw", "nvm",
+}
 
 
-@dataclass
-class TopicLabel:
-    """A labeled topic with its top terms."""
-    topic_id: int           # Zero-indexed topic number
-    top_terms: list[tuple[str, float]]  # (keyword, weight) pairs
-    label: str              # Auto-derived label from top term
-    perplexity: float       # Model perplexity on held-out data
-    coherence_score: float  # Coherence score (C_v)
+# ---------------------------------------------------------------------------
+# Data structures
+# ---------------------------------------------------------------------------
 
+@dataclass 
+class TopicResult:
+    """A single discovered LDA topic with its top terms and strength."""
+    topic_id: int
+    top_words: List[Tuple[str, float]]          # [(word, weight)]
+    dominant_documents: List[str] = field(default_factory=list)
+    overall_strength: float = 0.0
 
-@dataclass
-class TopicDistribution:
-    """Topic distribution for a single document."""
-    doc_id: str
-    subreddit: str
-    topic_probs: list[float]          # P(topic_i | doc)
-    dominant_topic: int               # Most probable topic index
-    confidence: float                 # Confidence of dominant topic assignment
-
-
-@dataclass
-class LDAResult:
-    """Full LDA model output."""
-    n_topics_modelled: int
-    coherence_score: float
-    perplexity: float
-    topics_per_topic: dict[int, list[tuple[str, float]]]  # {topic_id: [(term, weight)]}
-    document_distributions: list[TopicDistribution]
-    topic_subreddit_breakdown: dict[int, dict[str, float]]  # {topic_id: {subreddit: avg_prob}}
-    optimal_n_topics: int               # Suggested optimal number of topics
-
-
-class LDAModeler:
-    """Discover latent topics in subreddit content using LDA (gensim).
-
-    Features:
-        - Automatic coherence-based model selection across K=2..K_range
-        - Per-subreddit topic breakout tables
-        - Per-document topic assignments
-        - C_v coherence scoring for model quality validation
-    """
-
-    def __init__(
-        self,
-        n_topics: int = 5,
-        max_k: int = 10,
-        random_state: int = 42,
-        passes: int = 20,
-        alpha: str | float | None = "auto",
-        eta: str | float | None = "auto",
-        minimum_probability: float = 0.01,
-        per_word_topn: int = 20,
-    ):
-        """Initialize LDA modeler.
-
-        Args:
-            n_topics: Number of topics to model.
-            max_k: Maximum K to check for automatic selection (K=2..max_k).
-            random_state: Reproducibility seed.
-            passes: Gensim LDALatentDirichletAllocation passes.
-            alpha: Dirichlet prior on document topic distribution. "auto" = symmetric adaptive.
-            eta: Dirichlet prior on topic word distribution. "auto" = symmetric adaptive.
-            minimum_probability: Minimum probability threshold for reporting topics in a doc.
-            per_word_topn: Number of top words per topic to extract.
-        """
-        self.n_topics = n_topics
-        self.max_k = max_k
-        self.random_state = random_state
-        self.passes = passes
-        self.alpha = alpha
-        self.eta = eta
-        self.minimum_probability = minimum_probability
-        self.per_word_topn = per_word_topn
-
-        # Imports happen after init to keep startup fast when LDAModeler not instantiated
-        self._lda_model = None
-        self._dictionary = None
-        self._corpus = None
-        self._id2word = None
-
-    # ─────────────────────────────────────────────────╸ Preprocessing ─────────────────────────────────────────────────
-
-    @staticmethod
-    def _tokenize(text: str) -> list[str]:
-        """Simple tokenizer: lowercase, alphabetic tokens of 3+ chars."""
-        if not text:
-            return []
-        lowered = text.lower()
-        tokens = re.findall(r"[a-z]{3,}", lowered)
-        # Common stopwords to filter out
-        STOP_WORDS = {
-            "this", "that", "these", "those", "what", "which", "who", "how",
-            "many", "much", "more", "most", "some", "any", "other", "each",
-            "every", "both", "few", "less", "might", "also", "would", "could",
-            "should", "will", "can", "been", "have", "has", "had", "being",
-            "their", "there", "where", "when", "about", "into", "over", "such",
-            "with", "from", "then", "just", "only", "like", "well", "get",
-            "want", "make", "know", "use", "one", "two", "good", "need",
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "topic_id": self.topic_id,
+            "top_words": [(w, round(wt, 4)) for w, wt in self.top_words],
+            "dominant_documents": self.dominant_documents[:10],
+            "overall_strength": round(self.overall_strength, 4),
         }
-        return [t for t in tokens if t not in STOP_WORDS]
 
-    def _build_corpus(
-        self, threads: list[dict]
-    ) -> tuple[" corpora.Dictionary", list[tuple[int, int]], dict[str, str]]:
-        """Build gensim dictionary and corpus from thread data.
 
-        Returns:
-            (dictionary, corpus_as_list_of_bow, doc_id_map)
-                - dictionary: gensim.corpora.Dictionary
-                - corpus: list of (token_id, freq) bags of words
-                - doc_id_map: {bow_index: {"id": str, "subreddit": str, "text": str}}
-        """
-        import gensim
+@dataclass
+class SubredditTopicSummary:
+    """Topics discovered within a subreddit."""
+    subreddit: str
+    n_topics: int
+    topics: List[TopicResult] = field(default_factory=list)
+    per_topic_coherence: float = 0.0
+    perplexity: Optional[float] = None
 
-        # Collect all token lists and map doc positions to metadata
-        doc_meta: dict[int, dict] = {}  # bow_index -> {id, subreddit, text}
-        token_lists: list[list[str]] = []
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "subreddit": self.subreddit,
+            "n_topics": self.n_topics,
+            "topics": [t.to_dict() for t in self.topics],
+            "per_topic_coherence": round(self.per_topic_coherence, 4),
+            "perplexity": round(self.perplexity, 4) if self.perplexity else None,
+        }
 
-        for idx, t in enumerate(threads):
-            text = (t.get("title", "") or "") + " " + ((t.get("body") or "")[:300])
-            tokens = self._tokenize(text)
-            if not tokens:
-                continue
-            bow_idx = len(token_lists)
-            token_lists.append(tokens)
-            doc_meta[bow_idx] = {
-                "id": t.get("id", str(idx)),
-                "subreddit": t.get("subreddit", "unknown"),
-                "text": text,
-            }
 
-        if not token_lists:
-            raise ValueError("No valid documents to process for LDA.")
+def _clean_document(raw: str) -> List[str]:
+    """Tokenize + lowercase + strip stop words for LDA."""
+    import re
+    lower = raw.lower()
+    tokens = re.findall(r"\b[a-z]{3,}\b", lower)
+    return [t for t in tokens if t not in _EXTENSION_STOP_WORDS]
 
-        # Build gensim Dictionary and corpus
-        dictionary = gensim.corpora.Dictionary(token_lists)
-        # Remove very rare / very common terms for cleaner topics
-        dictionary.filter_extremes(no_below=2, no_above=0.85)
-        bow_corpus = [dictionary.doc2bow(tokens) for tokens in token_lists]
 
-        return dictionary, bow_corpus, doc_meta
+class LdaTopicModel:
+    """Latent Dirichlet Allocation topic discovery using gensim. """
 
-    # ─────────────────────────────────────────────────╸ Coherence computation ─────────────────────────────────────────────────
+    def __init__(self, random_state: int = 42, passes: int = 10):
+        self._random_state = random_state
+        self._passes = passes
+        self._dictionary = Dictionary()
+        self._lda_model: Optional[LdaModel] = None  # type: ignore
+        self._corpus_bow: List[List[Tuple[int, float]]] = []
 
-    def _compute_coherence(
-        self, model, corpus: list, doc_meta: dict, texts_raw: list[list[str]]
-    ) -> float:
-        """Compute C_v coherence score for an LDA model."""
-        import gensim
-
-        # Prepare texts for coherence (gensim expects list of lists of tokens)
-        dictionary = gensim.corpora.Dictionary(texts_raw)
-        dictionary.filter_extremes(no_below=2, no_above=0.85)
-
-        from gensim.models.coherencemodel import CoherenceModel
-
-        cm = CoherenceModel(
-            model=model,
-            texts=texts_raw,
-            dictionary=dictionary,
-            coherence="c_v",
-        )
-        return cm.get_coherence()
-
-    # ─────────────────────────────────────────────────╸ Automatic K selection ─────────────────────────────────────────────────
-
-    def _find_optimal_k(
-        self,
-        corpus: list,
-        doc_meta: dict,
-        texts_raw: list[list[str]],
-    ) -> tuple[int, float]:
-        """Fit LDA models for K=2..max_k and pick the one with highest C_v coherence."""
-        import gensim
-
-        coherences = []
-        best_k = self.n_topics
-        best_c = -np.inf
-
-        print(f"\n🔍 Scanning optimal K range (2..{self.max_k})...")
-        for k in range(2, self.max_k + 1):
-            model = gensim.models.LdaMulticore(
-                corpus=corpus,
-                id2word=self._id2word,
-                num_topics=k,
-                random_state=self.random_state,
-                passes=max(self.passes // 3, 5),  # Fewer passes for hyperparameter sweep
-                workers=-1,  # Use all cores
-            )
-            c = self._compute_coherence(model, corpus, doc_meta, texts_raw)
-            coherences.append((k, c))
-            print(f"  K={k:>2d}  C_v={c:.4f}")
-
-            if c > best_c:
-                best_c = c
-                best_k = k
-
-        print(f"\n✦ Optimal K: {best_k} (C_v={best_c:.4f})")
-        return best_k, best_c
-
-    # ─────────────────────────────────────────────────╸ Main Fitting ─────────────────────────────────────────────────
+    # ------------------------------------------------------------------ g gensim fit ---
 
     def fit(
         self,
-        threads: list[dict],
-        find_best_k: bool = True,
-        verbose: bool = True,
-    ) -> LDAResult:
-        """Fit LDA model to crawled thread data.
+        documents: List[str],
+        n_topics: int = 5,
+        id2word: Optional[Dictionary] = None,
+        num_passes: Optional[int] = None,
+        alpha: str = "auto",
+        chunksize: int = 128,
+    ) -> SubredditTopicSummary:
+        """Train LDA on provided documents and return a summary."""
+        texts_to_train: List[List[str]] = [_clean_document(d) for d in documents]
+        
+        valid_indices = [i for i, t in enumerate(texts_to_train) if len(t) > 0]
+        if len(valid_indices) < 2:
+            logger.warning("Fewer than 2 non-empty docs after cleaning.")
+            return SubredditTopicSummary(n_topics=0, topics=[], subreddit="")
 
-        Args:
-            threads: List of thread dicts with 'id', 'subreddit', 'title', optional 'body'.
-            find_best_k: If True, automatically determine best K before fitting final model.
-            verbose: Print progress information.
+        texts_to_train = [texts_to_train[i] for i in valid_indices]
+        
+        if id2word is not None:
+            self._dictionary = id2word
+        else:
+            self._dictionary = Dictionary(texts_to_train)
+            self._dictionary.filter_extremes(no_below=2, no_above=0.5)
 
-        Returns:
-            LDAResult with topics, document distributions, and coherence/perplexity metrics.
-        """
-        import gensim
+        self._corpus_bow = [self._dictionary.doc2bow(t) for t in texts_to_train]
+        
+        if not self._corpus_bow:
+            logger.warning("Empty BoW corpus after filtering.")
+            return SubredditTopicSummary(n_topics=0, topics=[], subreddit="")
 
-        if verbose:
-            print("=" * 60)
-            print("📊 LDA Topic Modeler")
-            print("=" * 60)
-
-        # Step 1: Build corpus
-        dictionary, bow_corpus, doc_meta = self._build_corpus(threads)
-        n_docs = len(bow_corpus)
-        n_terms = len(dictionary)
-
-        if verbose:
-            print(f"\n📄 Corpus: {n_docs} documents, {n_terms} unique terms")
-            print(f"   Vocab sample: {list(dictionary.keys())[:15]}...")
-
-        # Prepare raw token lists for coherence scoring
-        self._id2word = dictionary
-        self._corpus = bow_corpus
-        texts_raw: list[list[str]] = []
-        for tokens in (dictionary.doc2bow(t) for t in []):
-            pass  # placeholder
-        texts_raw = [self._tokenize((t.get("title", "") or "") + " " + ((t.get("body") or "")[:300])) for t in threads if t]
-
-        # Step 2: Determine K
-        chosen_k = self.n_topics
-        best_coherence = -np.inf
-        if find_best_k and len(set(t.get("subreddit", "unknown") for t in threads)) >= 2:
-            chosen_k, best_coherence = self._find_optimal_k(bow_corpus, doc_meta, texts_raw)
-
-        # Step 3: Fit final model with chosen K
-        if verbose:
-            print(f"\n🧠 Fitting LDA ({chosen_k} topics, {self.passes} passes)...")
-
-        self._lda_model = gensim.models.LdaMulticore(
-            corpus=bow_corpus,
-            id2word=dictionary,
-            num_topics=chosen_k,
-            random_state=self.random_state,
-            passes=self.passes,
-            workers=-1,
+        num_passes = num_passes or self._passes
+        logger.info(
+            "LDA training - n_topics=%d, passes=%d, docs=%d",
+            n_topics, num_passes, len(self._corpus_bow),
         )
-        coherence = -np.inf
-        perplexity = -np.inf
 
-        # Compute coherence & perplexity on full corpus
-        try:
-            coherence = self._compute_coherence(self._lda_model, bow_corpus, doc_meta, texts_raw)
-        except Exception:
-            pass  # Coherence may fail on some gensim versions; set to 0
-        print(f"\n📊 Model Coherence (C_v): {coherence:.4f}")
+        lda_model = LdaModel(  # type: ignore[misc]
+            corpus=self._corpus_bow,
+            id2word=self._dictionary,
+            num_topics=n_topics,
+            random_state=self._random_state,
+            passes=num_passes,
+            alpha=alpha,
+            chunksize=chunksize,
+            eval_every=None,
+        )
+        self._lda_model = lda_model
 
-        # Perplexity approximation (lower is better perplexity)
-        try:
-            perplexity = self._lda_model.log_perplexity(bow_corpus)
-            if np.isfinite(perplexity):
-                perplexity = float(np.exp(perplexity))
-        except Exception:
-            perplexity = -1.0
-        print(f"📈 Perplexity (est): {perplexity:.4f}" if np.isfinite(perplexity) else "📈 Perplexity: N/A")
+        # Collect topics
+        raw_topics = lda_model.show_topics(num_topics=n_topics, formatted=False)
+        topics: List[TopicResult] = []
 
-        # Step 4: Extract topics
-        topics_per_topic: dict[int, list[tuple[str, float]]] = {}
-        id2word = dictionary.id2token
-        for topic_id in range(chosen_k):
-            top_words_raw = self._lda_model.show_topic(topic_id, self.per_word_topn)
-            # Sort by probability descending (show_topic returns sorted descending already) but format properly
-            top_words: list[tuple[str, float]] = [
-                (id2word[wid], round(float(prob), 6))
-                for wid, prob in top_words_raw
+        for topic_idx_raw, (topic_words_list, log_prob_value) in enumerate(raw_topics):
+            top_words = [
+                (self._dictionary.get(word_id, f"term_{word_id}"), round(float(wt), 4))
+                for word_id, wt in topic_words_list[:15]
             ]
-            topics_per_topic[topic_id] = top_words
+            topics.append(TopicResult(
+                topic_id=topic_idx_raw + 1,
+                top_words=top_words,
+                overall_strength=float(log_prob_value),
+            ))
 
-        # Step 5: Document-level topic distributions
-        doc_distributions: list[TopicDistribution] = []
-        topic_subreddit_breakdown: dict[int, dict[str, list[float]]] = defaultdict(
-            lambda: defaultdict(list)
-        )
-
-        for bow_idx in range(len(bow_corpus)):
-            # Get dense topic vector for this document
-            doc_topics = self._lda_model.get_document_topics(bow_corpus[bow_idx], minimum_prune=0.0)
-            # Normalize to sum to 1
-            probs = np.zeros(chosen_k)
-            total_weight = 0
-            for tid, weight in doc_topics:
-                probs[tid] = weight
-                total_weight += weight
-
-            if total_weight > 0:
-                probs /= total_weight
-
-            dominant_topic = int(np.argmax(probs))
-            confidence = float(probs[dominant_topic])
-
-            meta = doc_meta.get(bow_idx, {})
-            doc_dist = TopicDistribution(
-                doc_id=meta.get("id", f"doc_{bow_idx}"),
-                subreddit=meta.get("subreddit", "unknown"),
-                topic_probs=[round(float(p), 6) for p in probs],
-                dominant_topic=dominant_topic,
-                confidence=round(confidence, 4),
+        # Try C_v coherence metric
+        coherence = 0.0
+        try:
+            from gensim.models import CoherenceModel  # type: ignore
+            cm = CoherenceModel(
+                model=lda_model, texts=texts_to_train[:50],
+                dictionary=self._dictionary, coherence="c_v",
             )
-            doc_distributions.append(doc_dist)
+            coherence = cm.get_coherence()  # type: ignore
+        except ImportError:
+            pass
 
-            # Populate subreddit breakdown accumulator
-            sub = doc_dist.subreddit
-            for tid in range(chosen_k):
-                topic_subreddit_breakdown[tid][sub].append(probs[tid])
-
-        # Average the subreddit probabilities per topic
-        topic_subreddit_avg: dict[int, dict[str, float]] = {}
-        for tid, subs in topic_subreddit_breakdown.items():
-            topic_subreddit_avg[tid] = {
-                sub: round(float(np.mean(vals)), 6)
-                for sub, vals in subs.items()
-            }
-
-        result = LDAResult(
-            n_topics_modelled=chosen_k,
-            coherence_score=round(float(coherence), 4),
-            perplexity=round(float(perplexity), 4) if np.isfinite(perplexity) else -1.0,
-            topics_per_topic=topics_per_topic,
-            document_distributions=doc_distributions,
-            topic_subreddit_breakdown=topic_subreddit_avg,
-            optimal_n_topics=chosen_k,
+        return SubredditTopicSummary(
+            subreddit="train_corpus",
+            n_topics=n_topics,
+            topics=topics,
+            per_topic_coherence=round(coherence, 4),
         )
 
-        return result
+    # ------------------------------------------------------------- sklearn_fit ----
+    
+    def fit_sklearn(
+        self,
+        corpus_tokens: List[List[str]],
+        n_topics: int = 5,
+    ) -> SubredditTopicSummary:
+        """Alternative path using scikit-learn LDA (no gensim dependency)."""
+        from sklearn.decomposition import LatentDirichletAllocation as SklearnLDA  # type: ignore
+        from sklearn.feature_extraction.text import TfidfVectorizer
 
+        texts = [" ".join(tokens) for tokens in corpus_tokens]
+        vec = TfidfVectorizer(
+            max_features=500,
+            stop_words="english",
+            token_pattern=r"(?u)\b[a-z]{3,}\b",
+        )
+        tfidf_matrix = vec.fit_transform(texts)
 
-    # ─────────────────────────────────────────────────╸ Topic Labels (auto-naming) ─────────────────────────────────────────────────
+        lda_sk = SklearnLDA(
+            n_components=n_topics, max_iter=20,
+            learning_method="online", random_state=self._random_state,
+        )
+        topic_word_dense = lda_sk.fit_transform(tfidf_matrix)
+        
+        feature_names = vec.get_feature_names_out()
+        topics: List[TopicResult] = []
 
-    def _derive_topic_labels(self, topics_per_topic: dict[int, list[tuple[str, float]]]) -> dict[int, str]:
-        """Auto-derive a label for each topic from its top term."""
-        labels: dict[int, str] = {}
-        for tid, words in topics_per_topic.items():
-            if words:
-                # Use the top 2-3 terms as label
-                top_terms = [w[0].title() for w in words[:3]]
-                labels[tid] = " / ".join(top_terms)
-            else:
-                labels[tid] = f"Topic_{tid}"
-        return labels
+        for i in range(n_topics):
+            top_word_indices_for_topic = np.argsort(topic_word_dense[:, i])[::-1][:15]
+            top_words: List[Tuple[str, float]] = [
+                (feature_names[idx], round(float(topic_word_dense[i][idx]), 4))
+                for idx in top_word_indices_for_topic
+            ]
 
-    def _format_topic_breakdown(self, result: LDAResult) -> str:
-        """Format a human-readable topic breakdown table."""
-        labels = self._derive_topic_labels(result.topics_per_topic)
-        lines: list[str] = []
-        lines.append("\n📋 Topic Breakdown:")
-        lines.append("─" * 80)
+            dominant_docs = [f"doc_{j}" for j in np.argsort(  # type: ignore[arg-type]
+                lda_sk.components_[i]
+            )[::-1][:5]]
+            
+            topics.append(TopicResult(
+                topic_id=i + 1,
+                top_words=top_words,
+                dominant_documents=dominant_docs,
+                overall_strength=float(np.mean(topic_word_dense[:, i])),
+            ))
 
-        for tid in sorted(result.topics_per_topic.keys()):
-            label = labels.get(tid, f"Topic_{tid}")
-            top_terms = [f"{term}({w:.3f})" for term, w in result.topics_per_topic[tid][:10]]
-            lines.append(f"\n  📌 Topic {tid}: {label}")
-            lines.append(f"     Terms: {' • '.join(top_terms)}")
+        ppl = float(lda_sk.perplexity_(tfidf_matrix)) if hasattr(lda_sk, "perplexity_") and lda_sk.perplexity_ is not None else None  # type: ignore
 
-        if result.topic_subreddit_breakdown:
-            lines.append("\n\n🔀 Top Topics by Subreddit:")
-            for tid in sorted(result.topic_subreddit_breakdown.keys()):
-                subs = result.topic_subreddit_breakdown[tid]
-                if not subs:
-                    continue
-                top_sub = max(subs.items(), key=lambda x: x[1])
-                label = labels.get(tid, f"T{tid}")
-                lines.append(f"  Topic {tid} ({label}): dominated by r/{top_sub[0]} (avg_prob={top_sub[1]:.4f})")
+        return SubredditTopicSummary(
+            subreddit="custom",
+            n_topics=n_topics,
+            topics=topics,
+            per_topic_coherence=round(float(ppl) if ppl else 0.0, 4),
+            perplexity=ppl,
+        )
 
-        return "\n".join(lines)
+    # ---- accessors -------------------------------------------------
 
+    @property
+    def topic_word_distribution(self) -> np.ndarray:
+        """Access the word-topic distribution for post-hoc analysis."""
+        if self._lda_model is None:
+            raise RuntimeError("Call fit() first.")
+        # Each row = a topic, each col = a vocab entry.
+        n_topics = self._lda_model.num_topics  # type: ignore[attr-defined]
+        n_terms = len(self._dictionary)
+        dist = np.zeros((n_topics, n_terms))
+        for i in range(n_topics):
+            for wordid, weight in self._lda_model.state.sufficient_stats["topics"].items():
+                if isinstance(wordid, int):
+                    dis[i][wordid] = weight
+        return dist
 
-def run_example():
-    """Demo: Run LDA topic modeling on sample Reddit-style content."""
-    print("=" * 60)
-    print("📊 LDA Topic Modeler - Demo")
-    print("=" * 60)
+    # ---- persistence -----------------------------------------------
 
-    # Sample data (simulating crawled Reddit content across subreddits)
-    threads = [
-        {"id": "1", "subreddit": "python", "title": "Python type hints best practices for large projects", "body": "What are the best practices for using typeddict and mypy in Python 3.11?"},
-        {"id": "2", "subreddit": "python", "title": "Using dataclasses with post init inheritance and decorators", "body": "How to properly inherit from dataclasses and override field defaults?"},
-        {"id": "3", "subreddit": "python", "title": "Asyncio performance comparison threads vs processes", "body": "I benchmarked asyncio against concurrent.futures. Results surprising."},
-        {"id": "4", "subreddit": "python", "title": "Type hints for generic functions and complex signatures", "body": "Struggling with TypeVar constraints and protocol patterns in mypy"},
-        {"id": "5", "subreddit": "datascience", "title": "Feature engineering tips for text classification transformers", "body": "What features work best when using BERT for sentiment analysis?"},
-        {"id": "6", "subreddit": "datascience", "title": "Should I use XGBoost or neural networks for tabular data?", "body": "My dataset has mixed categorical and numerical features. What works better?"},
-        {"id": "7", "subreddit": "datascience", "title": "Data validation pipelines at scale with Great Expectations and dbt", "body": "How do you handle schema changes in production data pipelines?"},
-        {"id": "8", "subreddit": "datascience", "title": "Machine learning model monitoring drift detection in production", "body": "Tools for tracking feature drift and concept drift in deployed ML models"},
-        {"id": "9", "subreddit": "machinelearning", "title": "Training transformers on custom datasets with HuggingFace Trainers", "body": "Best practices for fine-tuning BERT and RoBERTa on domain-specific text"},
-        {"id": "10", "subreddit": "machinelearning", "title": "Graph neural networks for recommender systems research", "body": "Using GCN and GAT layers for collaborative filtering on sparse interaction matrices"},
-        {"id": "11", "subreddit": "machinelearning", "title": "Federated learning privacy differential equations and convergence", "body": "Implementing secure aggregation with local SGD in distributed ML systems"},
-        {"id": "12", "subreddit": "reactjs", "title": "React Query vs SWR performance comparison 2024 benchmarks", "body": "I migrated from React Query to SWR and here are my detailed benchmarks on caching and prefetching"},
-        {"id": "13", "subreddit": "reactjs", "title": "Server components explained beginners guide next js app router", "body": "A simple comprehensive guide understanding Next.js server components client side rendering streaming"},
-        {"id": "14", "subreddit": "reactjs", "title": "State management patterns zustand jotai recoil comparison for large apps", "body": "Which library works best for complex form state with use cases and middleware integrations?"},
-    ]
+    def save(self, path: str) -> None:
+        """Persist the Gensim LDA model to disk."""
+        if self._lda_model is None:
+            raise RuntimeError("No model saved: call fit() first.")
+        self._dictionary.save(path + "_dict.dict")
+        self._lda_model.save(path + "_lda.model")
 
-    modeler = LDAModeler(n_topics=3, max_k=5, passes=20)
-    result = modeler.fit(threads, find_best_k=True)
+    @staticmethod
+    def from_disk(dict_path: str, lda_path: str) -> "LdaTopicModel":
+        """Restore an LDA model and its dictionary from disk."""
+        instance = LdaTopicModel()
+        instance._dictionary = Dictionary.load(dict_path)
+        instance._lda_model = LdaModel.load(lda_path)  # type: ignore[misc]
+        return instance
 
-    print(modeler._format_topic_breakdown(result))
+    # ---- cross-reddit comparison ----------------------------------------# -- topic_overlap -----------------------
 
-    # Per-document topic assignments
-    dominant_subs: dict[int, list[str]] = defaultdict(list)
-    for d in result.document_distributions:
-        dominant_subs[d.subreddit].append(d.dominant_topic)
+    def topic_overlap(
+        self, other: "LdaTopicModel", k_words: int = 10
+    ) -> Dict[int, float]:
+        """Jaccard overlap between this model's topics and another."""
+        if self._lda_model is None or other._lda_model is None:
+            raise RuntimeError("Both models must be trained to compare.")
 
-    print("\n🔗 Dominant Topics by Subreddit:")
-    for sub, topics in dominant_subs.items():
-        counter = Counter(topics)
-        top_topic, cnt = counter.most_common(1)[0]
-        label = modeler._derive_topic_labels(result.topics_per_topic).get(top_topic, f"T{top_topic}")
-        print(f"  r/{sub}: {cnt}/{len(topics)} samples → Topic_{top_topic} ({label})")
+        overlaps: Dict[int, float] = {}
+        for i in range(self._lda_model.num_topics):  # type: ignore[attr-defined]
+            own_words = set(w for w in self lda_model.show_topic(i, topn=k_words))  # type: ignore
+            best_overlap = 0.0
+            for j in range(other._lda_model.num_topics):  # type: ignore[attr-defined]
+                other_words = set(
+                    w for w in other._lda_model.show_topic(j, topn=k_words)  # type: ignore]
+                )
+                union_size = len(own_words | other_words) if own_words or other_words else 1
+                overlap = len(own_words & other_words) / max(union_size, 1)
+                if overlap > best_overlap:
+                    best_overlap = overlap
+            overlaps[i + 1] = round(best_overlap, 4)
 
-
-if __name__ == "__main__":
-    run_example()
+        return overlap
