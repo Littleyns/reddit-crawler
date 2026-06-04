@@ -255,30 +255,36 @@ export default function AnalyticsPage() {
               {/* Row 2: Sentiment pie + Weekly crawl */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Pie chart */}
-                <div className="bg-gray-900/60 border border-gray-800 rounded-lg p-5">
+                <div className="bg-gray-900/60 border border-gray-800 rounded-lg p-5 flex flex-col">
                   <h3 className="text-sm font-semibold mb-4 text-white">Sentiment Distribution</h3>
-                  <ResponsiveContainer width="100%" height={280}>
+                  <ResponsiveContainer width="100%" height={220}>
                     <PieChart>
                       <Pie
                         data={analyticsData.sentimentDistribution}
-                        cx="50%" cy="50%"
-                        outerRadius={95}
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
                         innerRadius={40}
                         fill="#8884d8"
                         dataKey="count"
-                        label={({ label }: any) => `${label}: ${(analyticsData.sentimentDistribution.reduce((s, d) => s + d.count, 0) > 0 ? (100 * analyticsData.sentimentDistribution.find((d: any) => d.label === label)!.count / analyticsData.sentimentDistribution.reduce((s: number, d: any) => s + d.count, 0)).toFixed(0) : 0}%` }
                         labelLine={false}
                       >
-                        {analyticsData.sentimentDistribution.map((entry, i) => (
+                        {analyticsData.sentimentDistribution.map((entry: any, i: number) => (
                           <Cell key={`cell-${i}`} fill={SENTIMENT_COLORS[entry.label] || COLORS[i % COLORS.length]} />
                         ))}
                       </Pie>
                       <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, color: '#fff' }} />
                     </PieChart>
                   </ResponsiveContainer>
+                  <div className="flex justify-center gap-4 mt-3">
+                    {analyticsData.sentimentDistribution.map((entry: any) => (
+                      <span key={entry.label} className="flex items-center gap-1.5 text-xs">
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: SENTIMENT_COLORS[entry.label] || '#8884d8' }} />
+                        <span className="text-gray-400">{entry.label}</span>
+                      </span>
+                    ))}
+                  </div>
                 </div>
-
-                {/* Weekly bar chart */}
                 <div className="lg:col-span-2 bg-gray-900/60 border border-gray-800 rounded-lg p-5">
                   <h3 className="text-sm font-semibold mb-4 text-white flex items-center gap-2">
                     <Briefcase className="w-4 h-4 text-sky-400" /> Weekly Crawl Volume (articles collected per day)
