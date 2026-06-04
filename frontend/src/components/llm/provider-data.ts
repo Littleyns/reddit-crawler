@@ -186,7 +186,7 @@ export function providerHasApiKeyUrl(provider: LLMProvider): boolean {
 /** Helper: all supported model IDs per provider (for autocomplete/fallback) */
 export const PROVIDER_DEFAULT_MODELS: Record<string, string[]> = {
   openai: ["gpt-4o", "gpt-4o-mini", "chatgpt-4o-latest", "gpt-4-turbo", "o1-preview", "o1-mini"],
-  google-gemini: ["gemini-pro", "gemini-pro-vision", "gemini-flash", "gemini-2.0-flash"]
+  google-gemini: ["gemini-pro", "gemini-pro-vision", "gemini-flash", "gemini-2.0-flash"],
   anthropic: ["claude-3-opus-latest", "claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-3-5-sonnet-20241022"],
   groq: ["llama-3.1-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"],
   perplexity: ["sonar-pro", "sonar-reasoning-pro", "sonar-reasoning"],
