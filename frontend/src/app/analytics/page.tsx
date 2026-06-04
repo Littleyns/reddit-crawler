@@ -13,7 +13,7 @@ import {
   PieChart,
   Pie,
   Cell,
-  RadialBar,
+
   AreaChart,
   Area,
   Tooltip,
@@ -160,19 +160,19 @@ function KeywordWordCloud() {
           </PieChart>
         </ResponsiveContainer>
 
-        {/* Radial bar side panel */}
-        <ResponsiveContainer width="100%" height={320}>
-          <RadialBar cx="50%" cy="50%" innerRadius={40} outerRadius="90%" data={pieData.map((kw, i) => ({
-            name: kw.value > 30 ? kw.name : `${kw.keyword}`,
-            value: kw.value,
-            fill: pieData[i].color,
-          }))} startAngle={90} endAngle={-270} barSize={6} dataKey="value">
-            <Legend iconType="circle" iconSize={6} label={{ fontSize: 10, fill: "var(--color-fg-secondary)" }} wrapperStyle={{ fontSize: 10 }} />
-            <RechartsTooltip
-              contentStyle={{ backgroundColor: "var(--color-surface-high)", border: "1px solid var(--color-border)", borderRadius: 0, color: "var(--color-fg-primary)", fontSize: 12 }}
-            />
-          </RadialBar>
-        </ResponsiveContainer>
+        {/* Keyword frequency list (side panel) */}
+        <div className="flex flex-col gap-2 h-full overflow-auto">
+          {(pieData || []).map((kw, i) => (
+            <div key={i} className="flex items-center gap-1.5 text-[10px]">
+              {kw.keyword.slice(0, 18)}
+              <span className="ml-auto font-mono tabular-nums">{kw.value}</span>
+              {/* tiny bar */}
+              <div className="h-1 w-full max-w-[60px] bg-[var(--color-border)] mt-[-2px] rounded">
+                <div className="h-full rounded" style={{ width: `${Math.min(kw.value / 50, 1) * 100}%`, backgroundColor: pieData[i].color }} />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
