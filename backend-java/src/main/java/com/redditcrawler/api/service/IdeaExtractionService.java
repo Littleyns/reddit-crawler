@@ -10,8 +10,8 @@ import java.util.stream.Collectors;
 
 /**
  * Extracts structured ideas from raw Reddit thread text.
- * Each idea: {title, description, category, confidence}.
- * Uses heuristic pattern matching + keyword lexicons for categorization.
+ * Each idea: {title, description, category}.
+ * Uses heuristic patterns + keyword lexicons for categorization.
  */
 @Service
 public class IdeaExtractionService {
@@ -19,7 +19,7 @@ public class IdeaExtractionService {
     private static final Logger log = LoggerFactory.getLogger(IdeaExtractionService.class);
     private static final String CAT_GENERAL = "general";
 
-    // ---- categories & keywords --------------------------------------------------
+    // --------------- categories & keywords ----------------------------------
 
     private static final Map<String, List<String>> CATEGORY_KEYWORDS = new LinkedHashMap<>();
 
@@ -58,7 +58,7 @@ public class IdeaExtractionService {
         ));
     }
 
-    // ---- idea model -------------------------------------------------------------
+    // --------------- idea model ---------------------------------------------
 
     public record Idea(String title, String description, String category, double confidence) {
         /** Resolve the string category to a stable enum. */
@@ -75,11 +75,8 @@ public class IdeaExtractionService {
         }
     }
 
-    // ---- extraction engine ------------------------------------------------------
+    // --------------- extraction engine --------------------------------------
 
-    /**
-     * Extract ideas from a single text body.
-     */
     public List<Idea> extractIdeas(String rawText) {
         if (rawText == null || rawText.isBlank()) {
             log.warn("extractIdeas called with blank input");
@@ -112,9 +109,6 @@ public class IdeaExtractionService {
         return ideas;
     }
 
-    /**
-     * Extract ideas from a collection of related posts (e.g. comments in a thread).
-     */
     public List<Idea> extractFromThread(List<String> postBodies) {
         if (postBodies == null || postBodies.isEmpty()) {
             return Collections.emptyList();
@@ -124,7 +118,7 @@ public class IdeaExtractionService {
         return deduplicateByTitle(allIdeas);
     }
 
-    // ---- classification ---------------------------------------------------------
+    // --------------- classification -----------------------------------------
 
     private Idea classifyAndBuild(String text, String title) {
         String lower = text.toLowerCase();
@@ -154,11 +148,11 @@ public class IdeaExtractionService {
         return new Idea(title, text, bestCategory, round(confidence, 2));
     }
 
-    // ---- helpers ----------------------------------------------------------------
+    // --------------- helpers ------------------------------------------------
 
     private static String normalize(String text) {
-        return text.replaceAll("\\n\\s*\\n", "\\n")
-                   .replaceAll("[\\t ]{3,}", " ")
+        return text.replaceAll("\n\\s*\n", "\n")
+                   .replaceAll("[\t ]{3,}", " ")
                    .replaceAll("\\r", "");
     }
 
