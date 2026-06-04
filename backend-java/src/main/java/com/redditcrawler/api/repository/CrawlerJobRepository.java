@@ -53,7 +53,7 @@ public interface CrawlerJobRepository extends JpaRepository<CrawlerJob, Long> {
 
     /* Average job duration per subreddit in seconds (PostgreSQL). */
     @Query(value = "SELECT subreddit, "
-        + "COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - started_at))::bigint), 0) as avg_duration "
+        + "COALESCE(SUM(EXTRACT(EPOCH FROM (completed_at - started_at))::bigint), 0)::numeric / NULLIF(COUNT(*), 0) as avg_duration "
         + "FROM crawler_jobs WHERE completed_at IS NOT NULL AND started_at IS NOT NULL "
         + "GROUP BY subreddit ORDER BY avg_duration DESC", nativeQuery = true)
     List<Object[]> avgJobDurationBySubreddit();
