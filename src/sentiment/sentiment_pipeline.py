@@ -1,327 +1,470 @@
 """
-Sentiment Analysis Pipeline
+Sentiment Analysis Pipeline -- Rotation Task A
 
-Provides unified sentiment scoring for Reddit threads using VADER (pre-installed) 
-and an optional Transformer-based analyzer (graceful fallback when transformers isn't available).
+Dual-backend sentiment analysis for crawled Reddit threads.
 
-Outputs per-thread sentiment scores: compound, pos, neg, neu.
+Backends:
+    "vader"          Lexicon-based (VADER), no model download, instant results.
+                     Good for rapid prototyping and large-scale filtering.
+    "transformers"   Contextual transformer model (pipeline) via HuggingFace.
+                     Higher accuracy, captures nuance/context in Reddit language.
+
+Output: per-thread sentiment scores aggregated by subreddit with overall statistics.
+
+Usage:
+    >>> from sentiment.sentiment_pipeline import SentimentPipeline
+    >>> threads = [
+    ...     {"id": "1", "subreddit": "python", "title": "Python is great!", "body": "..."},
+    ...     {"id": "2", "subreddit": "python", "title": "This is terrible.", "body": "..."},
+    ... ]
+    >>> pipeline = SentimentPipeline(backend="vader", threshold=0.1)
+    >>> result = pipeline.analyze(threads)
+    >>> print(result.summary())
+
+Dependencies (VADER):  pip install vaderSentiment nltk
+Dependencies (HF):     pip install transformers torch sentencepiece
 """
 
 from __future__ import annotations
 
-import json
-import logging
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
-
-# VADER is pre-installed in the venv
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-
-logger = logging.getLogger(__name__)
+import re
+import statistics
+from dataclasses import dataclass, field, asdict
+from enum import Enum
+from typing import Optional
 
 
-# ---------------------------------------------------------------------------
-# Data structures
-# ---------------------------------------------------------------------------
+# ────────────────────────────── Data classes ──────────────────────────────
+
+
+class SentimentLabel(str, Enum):
+    """Discrete sentiment labels derived from continuous scores."""
+    POSITIVE = "positive"
+    NEUTRAL = "neutral"
+    NEGATIVE = "negative"
+
 
 @dataclass
 class ThreadSentiment:
-    """Sentiment score for a single Reddit thread."""
+    """Sentiment score for a single thread/post."""
+    thread_id: str
+    subreddit: str
+    label: SentimentLabel      # positive / neutral / negative
+    score: float               # continuous sentiment score (backend-dependent)
+    title: str = ""            # sanitized original title
+    body_preview: str = ""     # first 80 chars of body
 
-    url_or_id: str            # thread URL or comment_id
-    title_sentiment: float    
-    body_sentiment: Optional[float] = None  
-    compound_title: float = 0.0          
-    compound_body: float = 0.5           
-    overall_compound: float = 0.0        
-    polarity_label: str = "neutral"      
-    
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "url_or_id": self.url_or_id,
-            "compound_title": round(self.compound_title, 4),
-            "compound_body": round(self.compound_body, 4),
-            "overall_compound": round(self.overall_compound, 4),
-            "polarity_label": self.polarity_label,
-        }
-
-    def __str__(self) -> str:
-        return (
-            f"ThreadSentiment({self.url_or_id[:20]}…) — "
-            f"{self.overall_compound:+.4f} ({self.polarity_label})"
-        )
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 @dataclass
-class SubredditSentimentSummary:
-    """Aggregated sentiment stats for an entire subreddit (or arbitrary collection)."""
-
+class SubredditSentiment:
+    """Aggregated sentiment stats for one subreddit."""
     subreddit: str
-    thread_count: int
-    mean_compound: float
-    median_compound: float
-    std_compound: float
-    positive_ratio: float
-    neutral_ratio: float
-    negative_ratio: float
-    # Raw list so the caller can compute additional stats
-    sentiments: List[ThreadSentiment] = field(default_factory=list)
+    total_threads: int = 0
+    positive_count: int = 0
+    neutral_count: int = 0
+    negative_count: int = 0
+    mean_score: float = 0.0
+    median_score: float = 0.0
+    std_score: float = 0.0
+    min_score: float = 0.0
+    max_score: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict:
+        return {k: v for k, v in asdict(self).items() if k != "subreddit"} | {"subreddit": self.subreddit}
+
+
+@dataclass
+class SentimentResult:
+    """Full output of a sentiment analysis run."""
+    backend: str
+    threshold: float
+    per_subreddit: dict[str, SubredditSentiment] = field(default_factory=dict)
+    all_threads: list[ThreadSentiment] = field(default_factory=list)
+    total_analyzed: int = 0
+
+    def summary(self) -> str:
+        """Return a compact human-readable summary."""
+        lines = [
+            f"{'=' * 56}",
+            f"📊 Sentiment Analysis Summary (backend={self.backend} threshold={self.threshold})",
+            f"{'=' * 56}",
+            f"Total threads analyzed: {self.total_analyzed}",
+            "",
+        ]
+
+        total_pos = sum(s.positive_count for s in self.per_subreddit.values())
+        total_neu = sum(s.neutral_count for s in self.per_subreddit.values())
+        total_neg = sum(s.negative_count for s in self.per_subreddit.values())
+        all_scores = [t.score for t in self.all_threads]
+
+        lines.append(f"  Overall: positive={total_pos}, neutral={total_neu}, negative={total_neg}")
+        if all_scores:
+            overall_mean = statistics.mean(all_scores)
+            lines.append(f"  Global mean score: {overall_mean:+.4f}")
+        lines.append("")
+
+        # Per-subreddit breakdown
+        for sub, stats in sorted(self.per_subreddit.items(), key=lambda x: -x[1].mean_score):
+            lines.append(
+                f"  r/{sub:<25} mean={stats.mean_score:+.4f}  "
+                f"P={stats.positive_count:>3} N={stats.neutral_count:>3} M={stats.negative_count:>3}"
+            )
+
+        lines.append("")
+        return "\n".join(lines)
+
+    def to_dict(self) -> dict:
         return {
-            "subreddit": self.subreddit,
-            "thread_count": self.thread_count,
-            "mean_compound": round(self.mean_compound, 4),
-            "median_compound": round(self.median_compound, 4),
-            "std_compound": round(self.std_compound, 4),
-            "positive_ratio": round(self.positive_ratio, 4),
-            "neutral_ratio": round(self.neutral_ratio, 4),
-            "negative_ratio": round(self.negative_ratio, 4),
+            "backend": self.backend,
+            "threshold": self.threshold,
+            "total_analyzed": self.total_analyzed,
+            "per_subreddit": {k: v.to_dict() for k, v in self.per_subreddit.items()},
+            "threads": [t.to_dict() for t in self.all_threads],
         }
 
 
-# ---------------------------------------------------------------------------
-# VADER Analyzer (always available)
-# ---------------------------------------------------------------------------
+# ─────────────────────── VADER Backend (lexicon-based) ───────────────────
 
-class VaderAnalyzer:
-    """Sentiment analyzer backed by VADER.  Works on any English text."""
+class _VADERBackend:
+    """Sentiment analysis using NLTK's VADER sentiment lexicon."""
 
-    def __init__(self):
-        self._sia = SentimentIntensityAnalyzer()
+    def __init__(self, threshold: float = 0.1, model_name: str | None = None):
+        self.threshold = threshold
+        self._initialized = False
 
-    def score(self, text: str) -> Dict[str, float]:
-        """Return a dict of {compound, pos, neg, neu}."""
-        if not text or not text.strip():
-            return {"compound": 0.0, "pos": 0.0, "neg": 0.0, "neu": 1.0}
-        raw = self._sia.polarity_scores(text)
-        # VADER already returns compound in [-1, 1] and pos/neg/neu in [0, 1]
-        return {k: round(v, 4) for k, v in raw.items()}
+    def _ensure_vader(self):
+        if not self._initialized:
+            try:
+                from nltk.sentiment.vader import SentimentIntensityAnalyzer
+                import nltk
 
-    def label_from_compound(self, compound: float) -> str:
-        if compound >= 0.05:
-            return "positive"
-        elif compound <= -0.05:
-            return "negative"
-        return "neutral"
+                nltk.download("vader_lexicon", quiet=True)
+                self.vader = SentimentIntensityAnalyzer()
+                self._initialized = True
+            except Exception as exc:
+                raise RuntimeError(
+                    "VADER analysis failed. Ensure NLTK data is available:\n"
+                    "    python -m nltk.downloader vader_lexicon"
+                ) from exc
 
+    def analyze_thread(self, thread: dict) -> ThreadSentiment:
+        """Analyze a single thread with VADER."""
+        self._ensure_vader()
 
-# ---------------------------------------------------------------------------
-# Transformer Analyzer (graceful fallback when transformers is missing)
-# ---------------------------------------------------------------------------
+        text = (thread.get("title", "") or "") + " " + ((thread.get("body") or "")[:500])
+        text = re.sub(r"http\S+|www\.\S+", "", text).strip()
 
-class TransformerAnalyzer:
-    """Lightweight pseudo-transformer sentiment scorer.
+        if not text:
+            text = "(empty)"
 
-    When the ``transformers`` and ``torch`` packages are present this class
-    loads a real HuggingFace model (``cardiffnlp/twitter-roberta-base-sentiment``).
-    
-    Otherwise it falls back to a simple lexicon-based heuristic so that the API
-    contract stays identical.
-    """
+        compound = self.vader.polarity_scores(text)["compound"]  # -1.0 to +1.0
 
-    FALLBACK_MODEL_NAME = "lexicon-fallback"  # marker used in debug output
-
-    def __init__(self, model_name: str = "cardiffnlp/twitter-roberta-base-sentiment"):
-        self._model_name = model_name
-        self._transformers_available = False
-        self._tokenizer = None
-        self._model = None
-        try:
-            # type ignore: we don't want to crash on ImportFailure for disk safety;
-            # gracefully fall back at use-time.
-            from transformers import AutoTokenizer, AutoModelForSequenceClassification  # type: ignore
-
-            self._transformers_available = True
-            logger.info("Loading Transformer model: %s", model_name)
-            self._tokenizer = AutoTokenizer.from_pretrained(model_name)
-            self._model = AutoModelForSequenceClassification.from_pretrained(model_name)
-        except (ImportError, RuntimeError, OSError):
-            # Transformers not installed, disk-quota exceeded, CUDA missing — no big deal.
-            self._model_name = TransformerAnalyzer.FALLBACK_MODEL_NAME
-            logger.warning(
-                "transformers unavailable; using lexicon fallback analyzer."
-            )
-
-    def score(self, text: str) -> Dict[str, float]:
-        if not text or not text.strip():
-            return {"compound": 0.0, "pos": 0.5, "neg": 0.0, "neu": 0.5}
-
-        if self._transformers_available and self._tokenizer is not None:
-            inputs = self._tokenizer(
-                text, truncation=True, max_length=512, return_tensors="pt"
-            )
-            # type ignore: transformers typing is notoriously messy
-            with __import__("torch").no_grad():  # type: ignore
-                outputs = self._model(**inputs)  # type: ignore
-            scores = outputs.logits[0].softmax(dim=0).tolist()
-            labels_order = ["negative", "neutral", "positive"]  # standard order
-            return {
-                "compound": round(scores[2] - scores[0], 4),
-                "pos": round(scores[2], 4),
-                "neg": round(scores[0], 4),
-                "neu": round(scores[1], 4),
-            }
-
-        # Lexicon fallback (same API as VADER without a dedicated analyzer)
-        vader = VaderAnalyzer()
-        raw = vader.score(text)
-        return {
-            "compound": raw["compound"],
-            "pos": raw["pos"],
-            "neg": raw["neg"],
-            "neu": raw["neu"],
-        }
-
-    def label_from_compound(self, compound: float) -> str:
-        """Same API as VaderAnalyzer.label_from_compound()."""
-        if compound >= 0.05:
-            return "positive"
-        elif compound <= -0.05:
-            return "negative"
-        return "neutral"
-
-
-# ---------------------------------------------------------------------------
-# Pipeline orchestrator
-# ---------------------------------------------------------------------------
-
-class SentimentPipeline:
-    """High-level pipeline: score a collection of Reddit threads and produce summaries."""
-
-    def __init__(
-        self,
-        vader: Optional[VaderAnalyzer] = None,
-        transformer: Optional[TransformerAnalyzer] = None,
-        backend: str = "vader",  # 'vader' | 'transformer' | 'ensemble'
-    ):
-        self._vader = vader or VaderAnalyzer()
-        self._transformer = (
-            transformer if transformer is not None else TransformerAnalyzer()
-        )
-        self._backend = backend
-
-        # Cache so we don't re-score the same text
-        self._cache: Dict[str, Dict[str, float]] = {}
-
-    def _get_scores(self, text: str) -> Dict[str, float]:
-        """Return sentiment scores using the configured backend."""
-        if not text or not text.strip():
-            return {"compound": 0.0, "pos": 0.0, "neg": 0.0, "neu": 1.0}
-
-        cached = self._cache.get(text)
-        if cached is not None:
-            return cached
-
-        if self._backend == "ensemble":
-            vader_raw = self._vader.score(text)
-            tfmr_scores = self._transformer.score(text)
-            combo = {k: round(0.5 * vader_raw[k] + 0.5 * tfmr_scores[k], 4)
-                     for k in ("compound", "pos", "neg", "neu")}
-        elif self._backend == "transformer":
-            combo = self._transformer.score(text)
-        else:
-            combo = self._vader.score(text)
-
-        self._cache[text] = combo
-        return combo
-
-    def _compound(self, scores: Dict[str, float]) -> float:
-        return scores.get("compound", 0.0)
-
-    def vader_label_from_compound(self, compound: float) -> str:
-        """Determine polarity label from a compound score."""
-        if compound >= 0.05:
-            return "positive"
-        elif compound <= -0.05:
-            return "negative"
-        return "neutral"
-
-    def score_thread(
-        self, title: str, body: Optional[str] = None, url_or_id: str = ""
-    ) -> ThreadSentiment:
-        """Analyze a single thread and return a ThreadSentiment dataclass."""
-        if isinstance(title, dict):
-            # Handle legacy call pattern where someone passes the dict directly
-            raise TypeError("Pass individual arguments, not a whole dict, to score_thread().")
-
-        title_scores = self._get_scores(title)
-        body_scores: Dict[str, float] = {}
-        if body and body.strip():
-            body_scores = self._get_scores(body)
-        else:
-            body_scores = {"compound": 0.5, "pos": 0.3, "neg": 0.2, "neu": 0.5}
-
-        title_compound = self._compound(title_scores)
-        body_compound = self._compound(body_scores)
-
-        # Weighted average — titles are more indicative of overall tone than comments
-        if title and body and body.strip():
-            overall = 0.65 * title_compound + 0.35 * body_compound
-        else:
-            overall = title_compound
-
-        polarity = self.vader_label_from_compound(overall)
+        label = self._score_to_label(compound, self.threshold)
 
         return ThreadSentiment(
-            url_or_id=url_or_id,
-            title_sentiment=round(title_compound, 4),
-            body_sentiment=round(body_compound, 4) if body and body.strip() else None,
-            compound_title=round(title_compound, 4),
-            compound_body=round(body_compound, 4),
-            overall_compound=round(overall, 4),
-            polarity_label=polarity,
+            thread_id=thread.get("id", "unknown"),
+            subreddit=thread.get("subreddit", "unknown"),
+            label=label,
+            score=round(compound, 6),
+            title=self._sanitize(thread.get("title", "")),
+            body_preview=((thread.get("body") or "")[:80]).strip(),
         )
 
-    def score_threads(
-        self, threads: List[Dict[str, str]]
-    ) -> List[ThreadSentiment]:
-        """Score a list of dicts with keys like '{'title': '...', 'body': '...', 'url': '...'}.'"""
-        return [self.score_thread(**t) for t in threads]
+    @staticmethod
+    def _score_to_label(score: float, threshold: float = 0.1) -> SentimentLabel:
+        if score > threshold:
+            return SentimentLabel.POSITIVE
+        elif score < -threshold:
+            return SentimentLabel.NEGATIVE
+        else:
+            return SentimentLabel.NEUTRAL
 
-    def summary_for(self, sentiments: List[ThreadSentiment], subreddit: str = "") -> SubredditSentimentSummary:
-        """Aggregate ThreadSentiment list into a SubredditSentimentSummary."""
-        import math
-        
-        compounds = [s.overall_compound for s in sentiments]
-        n = len(compounds)
-        if n == 0:
-            return SubredditSentimentSummary(
-                subreddit=subreddit,
-                thread_count=0, mean_compound=0.0, median_compound=0.0, std_compound=0.0,
-                positive_ratio=0.0, neutral_ratio=0.0, negative_ratio=0.0, sentiments=[],
+    @staticmethod
+    def _sanitize(text: str) -> str:
+        if not text:
+            return ""
+        return re.sub(r"http\S+|www\.\S+", "URL", text[:120]).strip()
+
+
+# ─────────────── Transformer Backend (HuggingFace) ─────────────────────
+
+class _TransformersBackend:
+    """Sentiment analysis using HuggingFace Transformers pipeline."""
+
+    def __init__(self, threshold: float = 0.1, model_name: str | None = None):
+        self.threshold = threshold
+        self.model_name = model_name or "distilbert-base-uncased-finetuned-sst-2-english"
+        self._pipeline = None
+        self._initialized = False
+
+    def _ensure_pipeline(self):
+        if self._initialized:
+            return True
+        try:
+            # NOTE: transformers + torch must be installed
+            from transformers import pipeline
+
+            print(f"  [SentimentPipeline] Loading {self.model_name} ...")
+            self._pipeline = pipeline(
+                "sentiment-analysis",
+                model=self.model_name,
+                tokenizer=self.model_name,
+                device=0 if self._has_gpu() else -1,  # GPU if available, else CPU
+            )
+            self._initialized = True
+            print(f"  [SentimentPipeline] ✅ Model loaded ({'GPU' if self._has_gpu() else 'CPU'}).")
+            return True
+        except ImportError as exc:
+            raise ImportError(
+                "HuggingFace transformers not installed. Install with:\n"
+                "    pip install transformers torch sentencepiece\n"
+                f"\nOriginal error: {exc}"
+            ) from exc
+
+    @staticmethod
+    def _has_gpu() -> bool:
+        try:
+            import torch  # type: ignore[import-untyped]
+            return torch.cuda.is_available() or (
+                hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+            )
+        except (ImportError, AttributeError):
+            return False
+
+    def analyze_thread(self, thread: dict) -> ThreadSentiment:
+        """Analyze a single thread with transformer model."""
+        loaded = self._ensure_pipeline()
+        if not loaded or self._pipeline is None:
+            # Return neutral fallback
+            return ThreadSentiment(
+                thread_id=thread.get("id", "unknown"),
+                subreddit=thread.get("subreddit", "unknown"),
+                label=SentimentLabel.NEUTRAL,
+                score=0.0,
             )
 
-        compounds_sorted = sorted(compounds)
-        mean_c = sum(compounds) / n
-        variance = sum((c - mean_c) ** 2 for c in compounds) / n
-        std_c = math.sqrt(variance)
-        
-        median_idx = n // 2
-        if n % 2 == 0 and n >= 2:
-            median_c = (compounds_sorted[n // 2 - 1] + compounds_sorted[n // 2]) / 2
-        else:
-            median_c = compounds_sorted[n // 2]
+        text = (thread.get("title", "") or "") + ". " + (((thread.get("body") or "")[:200]) or "")
+        text = re.sub(r"http\S+|www\.\S+", "", text).strip()
 
-        pos = sum(1 for c in compounds if self.vader_label_from_compound(c) == "positive")
-        neg = sum(1 for c in compounds if self.vader_label_from_compound(c) == "negative")
-        
-        return SubredditSentimentSummary(
-            subreddit=subreddit,
-            thread_count=n,
-            mean_compound=round(mean_c, 4),
-            median_compound=round(median_c, 4),
-            std_compound=round(std_c, 4),
-            positive_ratio=round(pos / n, 4),
-            neutral_ratio=0.0,
-            negative_ratio=round(neg / n, 4),
-            sentiments=sentiments,
+        if not text:
+            text = "(empty)"
+
+        result = self._pipeline(text, truncation=True, max_length=512)[0]
+        label_raw = result.get("label", "NEUTRAL")
+        score_val = float(result.get("score", 0.5))
+
+        # distilbert-sst outputs POSITIVE/NEGATIVE with a confidence score.
+        # Convert: positive → +confidence, negative → -conf_score, else neutral.
+        if label_raw == "POSITIVE":
+            compound = score_val
+            label = SentimentLabel.POSITIVE
+        elif label_raw == "NEGATIVE":
+            compound = -score_val
+            label = SentimentLabel.NEGATIVE
+        else:
+            compound = 0.0
+            label = SentimentLabel.NEUTRAL
+
+        return ThreadSentiment(
+            thread_id=thread.get("id", "unknown"),
+            subreddit=thread.get("subreddit", "unknown"),
+            label=label,
+            score=round(compound, 6),
+            title=self._sanitize(thread.get("title", "")),
+            body_preview=((thread.get("body") or "")[:80]).strip(),
         )
 
-    def score_multiple_subreddits(
-        self, data: Dict[str, List[Dict[str, str]]]
-    ) -> Dict[str, SubredditSentimentSummary]:
-        """Score threads from multiple subreddits and return per-subreddit summaries."""
-        return {sname: self.summary_for(thread_sents, subreddit=sname)}
+    @staticmethod
+    def _sanitize(text: str) -> str:
+        if not text:
+            return ""
+        return re.sub(r"http\S+|www\.\S+", "URL", text[:120]).strip()
+
+
+# ─────────────────────── Main Pipeline class ───────────────────────────
+
+class SentimentPipeline:
+    """Unified sentiment analysis pipeline with VADER and Transformer backends.
+
+    Args:
+        backend:         "vader" (lexicon, fast) or "transformers" (contextual, accurate).
+        threshold:       Minimum absolute score for positive/negative classification.
+                         Sentiments in [-threshold, +threshold] are labeled NEUTRAL.
+        model_name:      (Transformers only) HF model name for sentiment analysis.
+
+    Attributes:
+        result: Latest SentimentResult after calling analyze().
+    """
+
+    backends_map = {
+        "vader": _VADERBackend,
+        "transformers": _TransformersBackend,
+    }
+
+    def __init__(self, backend: str = "vader", threshold: float = 0.1, model_name: str | None = None):
+        if backend not in self.backends_map:
+            raise ValueError(
+                f"Unknown backend '{backend}'. Choices: {list(self.backends_map.keys())}"
+            )
+        self.backend_name = backend
+        self.threshold = threshold
+        self._backend = self.backends_map[backend](threshold, model_name=model_name)
+
+    def analyze(
+        self,
+        threads: list[dict],
+        n_subreddits: Optional[int] = None,
+        verbose: bool = True,
+    ) -> SentimentResult:
+        """Run sentiment analysis on a list of crawled threads.
+
+        Args:
+            threads:     List of dicts with keys 'id', 'subreddit', 'title', optional 'body'.
+            n_subreddits: If given and > 0, restrict to top-N subreddits by thread count (default: all).
+            verbose:     Print progress indicators.
+
+        Returns:
+            SentimentResult with per-thread scores and per-subreddit aggregations.
+        """
+        if not threads:
+            return SentimentResult(backend=self.backend_name, threshold=self.threshold)
+
+        # Determine subreddits to prioritize
+        sub_counts: dict[str, int] = {}
+        for t in threads:
+            s = t.get("subreddit", "unknown")
+            sub_counts[s] = sub_counts.get(s, 0) + 1
+
+        if n_subreddits and n_subreddits > 0:
+            allowed_subs = set(
+                k for k, _ in sorted(sub_counts.items(), key=lambda x: -x[1])[:n_subreddits]
+            )
+        else:
+            allowed_subs = None  # no restriction
+
+        per_sub: dict[str, list[float]] = {}   # subreddit → list of scores
+        all_threads: list[ThreadSentiment] = []
+
+        for i, thread in enumerate(threads):
+            sub = thread.get("subreddit", "unknown")
+
+            if allowed_subs is not None and sub not in allowed_subs:
+                continue
+
+            sentiment = self._backend.analyze_thread(thread)
+            all_threads.append(sentiment)
+            per_sub.setdefault(sub, []).append(sentiment.score)
+
+            if verbose and (i + 1) % 50 == 0:
+                print(f"  [SentimentPipeline] Processed {i+1}/{len(threads)} threads...")
+
+        # Aggregate per-subreddit stats
+        aggregated: dict[str, SubredditSentiment] = {}
+        for sub, scores in per_sub.items():
+            if not scores:
+                continue
+            n_pos = sum(1 for t in all_threads if t.subreddit == sub and t.label == SentimentLabel.POSITIVE)
+            n_neu = sum(1 for t in all_threads if t.subreddit == sub and t.label == SentimentLabel.NEUTRAL)
+            n_neg = sum(1 for t in all_threads if t.subreddit == sub and t.label == SentimentLabel.NEGATIVE)
+            aggregated[sub] = SubredditSentiment(
+                subreddit=sub,
+                total_threads=len(scores),
+                positive_count=n_pos,
+                neutral_count=n_neu,
+                negative_count=n_neg,
+                mean_score=round(statistics.mean(scores), 6),
+                median_score=round(statistics.median(scores), 6),
+                std_score=round(statistics.stdev(scores), 6) if len(scores) > 1 else 0.0,
+                min_score=min(scores),
+                max_score=max(scores),
+            )
+
+        return SentimentResult(
+            backend=self.backend_name,
+            threshold=self.threshold,
+            per_subreddit=aggregated,
+            all_threads=all_threads,
+            total_analyzed=len(all_threads),
+        )
+
+
+# ─────────────────────── Demo / standalone runner ──────────────────────
+
+def run_vader_example():
+    """Run a self-contained demo using VADER (no external model download)."""
+    print("=" * 60)
+    print("   Sentiment Analysis Pipeline - VADER Demo")
+    print("=" * 60)
+
+    pipeline = SentimentPipeline(backend="vader", threshold=0.1)
+
+    # Sample data simulating crawled Reddit threads
+    threads = [
+        {"id": "a1", "subreddit": "python",    "title": "Python is absolutely amazing! Best language ever!",   "body": "Just switched from Java and never looking back."},
+        {"id": "a2", "subreddit": "python",    "title": "This tutorial is terrible. Waste of time.",            "body": "Went through it twice. Nothing makes sense."},
+        {"id": "a3", "subreddit": "python",    "title": "What are your thoughts on Python 3.12 performance?",   "body": "I heard there are some improvements to the GIL."},
+        {"id": "a4", "subreddit": "datascience","title": "Deep learning models are revolutionizing ML pipelines", "body": "Transformers have become essential for NLP tasks like never before."},
+        {"id": "a5", "subreddit": "datascience","title": "My model keeps overfitting. Help!",                   "body": "Tried dropout, early stopping, and regularization but validation loss still goes up."},
+        {"id": "a6", "subreddit": "datascience","title": "Neutral question about feature scaling methods",           "body": "Is StandardScaler or MinMaxBetter actually? I need to know for better analysis."},
+        {"id": "b1", "subreddit": "reactjs",   "title": "React Query is a game changer for data fetching!",       "body": "Caching, deduplication, and refetching on focus — all out of the box."},
+        {"id": "b2", "subreddit": "reactjs",   "title": "Why does React keep breaking my app with every update?",  "body": "Had to refactor three times in two months. It is frustrating."},
+        {"id": "c1", "subreddit": "machinelearning", "title": "Graph Neural Networks for drug discovery!",        "body": "GCN on molecular graphs shows promising results for property prediction."},
+        {"id": "c2", "subreddit": "machinelearning", "title": "Training GPT from scratch is madness but rewarding.","body": "Spent 3 weeks on a cluster. Loss went down but it was painful process."},
+    ]
+
+    result = pipeline.analyze(threads, verbose=True)
+    print("\n" + result.summary())
+    return result
+
+
+def run_transformers_example():
+    """Run a demo using the Transformers backend (requires installation)."""
+    print("=" * 60)
+    print("   Sentiment Analysis Pipeline - Transformers Demo")
+    print("=" * 60)
+
+    try:
+        pipeline = SentimentPipeline(backend="transformers", threshold=0.1, model_name=None)
+    except Exception as exc:
+        print(f"❌ Could not initialize transformers backend:")
+        print(f"   {exc}")
+        print()
+        print("   This is expected if you have not installed HF libraries.")
+        print("   To install:  pip install transformers torch sentencepiece")
+        return None
+
+    threads = [
+        {"id": "t1", "subreddit": "python",     "title": "I love using Python for data analysis! So clean and efficient!", "body": "Pandas + NumPy make everything simple."},
+        {"id": "t2", "subreddit": "datascience", "title": "I hate ML conferences. So much hype, no substance.",     "body": "Everyone talks about AI but nobody shows real benchmarks."},
+        {"id": "t3", "subreddit": "reactjs",    "title": "Anyone have a good tutorial on Server Components next JS?",  "body": "The documentation is still confusing to me."},
+    ]
+
+    result = pipeline.analyze(threads, verbose=True)
+    if result:
+        print("\n" + result.summary())
+    return result
+
+
+# ──────────────────── Entry point (python -m sentiment.sentiment_pipeline) ───────────────────
+
+if __name__ == "__main__":
+    run_vader_example()
+    print()
+
+    # Run transforms example if available
+    has_transformers = False
+    try:
+        import transformers  # noqa: F401
+        has_transformers = True
+    except ImportError:
+        pass
+
+    if has_transformers:
+        run_transformers_example()
+    else:
+        print("\n" + "-" * 60)
+        print("ℹ️  Transformers backend skipped (not installed).")
+        print("   Install with: pip install transformers torch sentencepiece")
