@@ -44,8 +44,8 @@ public interface PostRepository extends JpaRepository<Post, Long> {
 
     /** Paginated posts by subreddit with optional search filter. */
     @Query("SELECT p FROM Post p WHERE (:subreddit IS NULL OR p.subreddit = :subreddit) " +
-           "AND (:search IS NULL OR p.title ILIKE CONCAT('%', :search, '%') " +
-           "OR p.body ILIKE CONCAT('%', :search, '%')) " +
+           "AND (:search IS NULL OR LOWER(p.title) LIKE LOWER(CONCAT('%', :search, '%')) " +
+           "OR LOWER(p.body) LIKE LOWER(CONCAT('%', :search, '%'))) " +
            "ORDER BY p.upvotes DESC")
     Page<Post> findBySubredditOrSearch(
             @Param("subreddit") String subreddit,
@@ -84,8 +84,9 @@ public interface PostRepository extends JpaRepository<Post, Long> {
     Integer totalUpvotesBySubreddit(@Param("subreddit") String subreddit);
 
     /** Top posters by post count and total upvotes. */
-    @Query("SELECT p.author, COUNT(p), SUM(COALESCE(p.upvotes, 0)) FROM Post p GROUP BY p.author ORDER BY COUNT(p) DESC")
-    List<Object[]> topPosters();
+    @Query("SELECT p.author, COUNT(p) AS postCount, SUM(COALESCE(p.upvotes, 0)) AS totalUps " +
+           "FROM Post p GROUP BY p.author ORDER BY postCount DESC")
+    List<Object[]> topPosters(@Param("limit") int limit);
 
     /** Get a set of all known subreddit names. */
     @Query("SELECT DISTINCT p.subreddit FROM Post p")

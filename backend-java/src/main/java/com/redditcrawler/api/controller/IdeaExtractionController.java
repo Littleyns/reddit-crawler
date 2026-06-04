@@ -37,9 +37,7 @@ public class IdeaExtractionController {
      * Accepts JSON: { "texts": ["post body 1", "post body 2", ...] }
      */
     @PostMapping("/extract")
-    public ResponseEntity<List<IdeaExtractionService.Idea>> extractIdeas(
-            @RequestBody IdeaRequest request) {
-
+    public ResponseEntity<List<IdeaExtractionService.Idea>> extractIdeas(@RequestBody IdeaRequest request) {
         if (request.texts() == null || request.texts().isEmpty()) {
             return ResponseEntity.ok(List.of());
         }
