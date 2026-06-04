@@ -13,7 +13,6 @@ import {
   PieChart,
   Pie,
   Cell,
-
   AreaChart,
   Area,
   Tooltip,
@@ -164,7 +163,7 @@ function KeywordWordCloud() {
         <div className="flex flex-col gap-2 h-full overflow-auto">
           {(pieData || []).map((kw, i) => (
             <div key={i} className="flex items-center gap-1.5 text-[10px]">
-              {kw.keyword.slice(0, 18)}
+              {(kw.name).slice(0, 18)}
               <span className="ml-auto font-mono tabular-nums">{kw.value}</span>
               {/* tiny bar */}
               <div className="h-1 w-full max-w-[60px] bg-[var(--color-border)] mt-[-2px] rounded">
