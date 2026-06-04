@@ -151,7 +151,7 @@ function KeywordWordCloud() {
               {pieData.map((entry, i) => (
                 <Cell key={`cell-${i}`} fill={entry.color} stroke="var(--color-bg-base)" strokeWidth={1} />
               ))}
-              <LabelList position="outside" fill="var(--color-fg-secondary)" fontSize={10} stroke="none" dataKey="name" maxWidth={80} />
+              <LabelList position="outside" fill="var(--color-fg-secondary)" fontSize={10} stroke="none" dataKey="name" />
             </Pie>
             <RechartsTooltip
               contentStyle={{ backgroundColor: "var(--color-surface-high)", border: "1px solid var(--color-border)", borderRadius: 0, color: "var(--color-fg-primary)", fontSize: 12 }}
