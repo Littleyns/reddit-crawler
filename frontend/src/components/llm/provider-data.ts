@@ -183,33 +183,3 @@ export function providerHasApiKeyUrl(provider: LLMProvider): boolean {
   return !!provider.apiKeyUrl;
 }
 
-/** Helper: all supported model IDs per provider (for autocomplete/fallback) */
-export const PROVIDER_DEFAULT_MODELS = {
-  openai: ["gpt-4o", "gpt-4o-mini", "chatgpt-4o-latest", "gpt-4-turbo", "o1-preview", "o1-mini"],
-  google-gemini: ["gemini-pro", "gemini-pro-vision", "gemini-flash", "gemini-2.0-flash"],
-  anthropic: ["claude-3-opus-latest", "claude-3-sonnet-20240229", "claude-3-haiku-20240307", "claude-3-5-sonnet-20241022"],
-  groq: ["llama-3.1-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"],
-  perplexity: ["sonar-pro", "sonar-reasoning-pro", "sonar-reasoning"],
-  mistral: ["mistral-large-latest", "mistral-small-latest", "open-mistral-nemo", "open-mixtral-8x7b"],
-  together: [
-    "meta-llama/Llama-3.1-70B-Instruct-Turbo",
-    "meta-llama/Llama-3.1-8B-Instruct-Turbo",
-    "mistralai/Mixtral-8x7B-Instruct-v0.1",
-    "Qwen/Qwen2.5-72B-Instruct-Turbo",
-    "deepseek-ai/DeepSeek-V3",
-  ],
-  openrouter: [
-    "anthropic/claude-3.5-sonnet",
-    "openai/gpt-4o",
-    "google/gemini-pro-1.5",
-    "meta-llama/llama-3.1-70b-instruct",
-    "mistralai/mixtral-8x7b",
-  ],
-  ollama: ["qwen3:32b", "qwen2.5:14b", "llama3.1:8b", "llama3.1:70b"],
-  cohere: ["command-r-plus", "command-r", "command-lite"],
-  deepinfra: [
-    "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-    "deepseek-ai/DeepSeek-V3",
-    "mistralai/Mixtral-8x7B-Instruct-v0.1",
-  ],
-} as const;
