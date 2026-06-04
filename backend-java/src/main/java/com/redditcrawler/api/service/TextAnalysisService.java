@@ -390,7 +390,7 @@ public class TextAnalysisService {
         fullReport.put("sentimentDetails", analyzeSentimentBySubreddit());
 
         // -- ideas --
-        List<Map<String, Object>> ideas = extractIdeas();
+        List<Map<String, Object>> ideas = extractIdeas(null);
         Map<String, Integer> categoryCounts = new HashMap<>();
         for (Map<String, Object> idea : ideas) {
             String cat = (String) idea.get("category");
