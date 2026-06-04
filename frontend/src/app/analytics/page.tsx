@@ -75,7 +75,7 @@ function SentimentChart() {
   if (!heatmap || heatmap.length === 0) {
     return (
       <div className="panel-sq-dense p-4 flex flex-col gap-3">
-        <section-header icon={Database} title="Sentiment Distribution" />
+        <SectionHeader icon={Database} title="Sentiment Distribution" />
         <ChartSkeleton />
       </div>
     );
@@ -90,7 +90,7 @@ function SentimentChart() {
 
   return (
     <div className="panel-sq-dense p-4 flex flex-col gap-3">
-      <section-header icon={Database} title="Sentiment Distribution" />
+      <SectionHeader icon={Database} title="Sentiment Distribution" />
       <ResponsiveContainer width="100%" height={320}>
         <BarChart data={chartData} barGap={0}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
@@ -125,7 +125,7 @@ function KeywordWordCloud() {
   if (!keywords || keywords.length === 0) {
     return (
       <div className="panel-sq-dense p-4 flex flex-col gap-3">
-        <section-header icon={Star} title="Keyword Frequency" />
+        <SectionHeader icon={Star} title="Keyword Frequency" />
         <ChartSkeleton />
       </div>
     );
@@ -133,7 +133,7 @@ function KeywordWordCloud() {
 
   return (
     <div className="panel-sq-dense p-4 flex flex-col gap-3">
-      <section-header icon={Star} title="Keyword Frequency" />
+      <SectionHeader icon={Star} title="Keyword Frequency" />
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_280px] gap-4 items-start">
         {/* Pie chart */}
         <ResponsiveContainer width="100%" height={320}>
@@ -188,7 +188,7 @@ function TrendsLineChart() {
   if (!trends || trends.length === 0) {
     return (
       <div className="panel-sq-dense p-4 flex flex-col gap-3">
-        <section-header icon={TrendingUp} title="Subreddit Engagement Trends" />
+        <SectionHeader icon={TrendingUp} title="Subreddit Engagement Trends" />
         <ChartSkeleton />
       </div>
     );
@@ -207,7 +207,7 @@ function TrendsLineChart() {
 
   return (
     <div className="panel-sq-dense p-4 flex flex-col gap-3">
-      <section-header icon={TrendingUp} title="Subreddit Engagement Trends" />
+      <SectionHeader icon={TrendingUp} title="Subreddit Engagement Trends" />
       <ResponsiveContainer width="100%" height={320}>
         <AreaChart data={series} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
           <defs>
@@ -278,7 +278,7 @@ function InsightsExtractorPanel() {
     <div className="panel-sq-dense p-4 flex flex-col gap-3">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <section-header icon={Lightbulb} title="Insights Extractor" />
+        <SectionHeader icon={Lightbulb} title="Insights Extractor" />
         {isLoading && <span className="text-[10px] text-[var(--color-fg-muted)] animate-pulse">Loading…</span>}
       </div>
 
@@ -331,7 +331,7 @@ function InsightsExtractorPanel() {
 /* Sub-components used across sections                                        */
 /* -------------------------------------------------------------------------- */
 
-function sectionHeader({ icon: Icon, title }: { icon: React.ElementType; title: string }) {
+function SectionHeader({ icon: Icon, title }: { icon: React.ElementType; title: string }) {
   return (
     <div className="flex items-center gap-2">
       <Icon className="h-4 w-4 text-[var(--color-accent-text)] shrink-0" />
