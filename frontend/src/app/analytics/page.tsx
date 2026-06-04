@@ -155,7 +155,7 @@ function KeywordWordCloud() {
             </Pie>
             <RechartsTooltip
               contentStyle={{ backgroundColor: "var(--color-surface-high)", border: "1px solid var(--color-border)", borderRadius: 0, color: "var(--color-fg-primary)", fontSize: 12 }}
-              formatter={(value: number) => [String(value), "frequency"]}
+              formatter={(_value: unknown) => [String(_value), "frequency"]}
             />
           </PieChart>
         </ResponsiveContainer>
