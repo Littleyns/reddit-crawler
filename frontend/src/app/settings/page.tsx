@@ -3,7 +3,7 @@
 import { cn } from "@/lib/utils";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { LoaderCircle, Save } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import { ApiKeyInput } from "@/components/api-key-input";
@@ -31,11 +31,15 @@ function toPayload(data: z.output<typeof formSchema>): SettingsPayload {
 }
 
 const tabDefs = [
+  { key: "llm-config" as const, label: "LLM Configuration" },
   { key: "credentials" as const, label: "Credentials & Defaults" },
   { key: "users" as const, label: "Users" },
 ] as const;
 
+type SettingsTab = (typeof tabDefs)[number]["key"];
+
 export default function SettingsPage() {
+  const [activeTab, setActiveTab] = useState<"llm-config" | "credentials" | "users">("credentials");
   const settingsQuery = useSettings();
   const saveMutation = useSaveSettings();
 
@@ -76,9 +80,12 @@ export default function SettingsPage() {
       {/* Tab bar */}
       <section className="flex gap-0 border-b border-[var(--color-border)] bg-[var(--color-surface-low)] -mx-px px-px overflow-x-auto">
         {tabDefs.map((t) => (
-          <button key={t.key} type="button"
+          <button key={t.key} type="button" onClick={() => setActiveTab(t.key)}
             className={cn(
-              "text-[10px] font-semibold uppercase tracking-wider py-2 px-4 text-[var(--color-fg-muted)] border-b-[2px] border-transparent hover:text-[var(--color-fg-secondary)] transition-colors whitespace-nowrap rounded-none",
+              "text-[10px] font-semibold uppercase tracking-wider py-2 px-4 text-[var(--color-fg-muted)] border-b-[2px] transition-colors whitespace-nowrap rounded-none",
+              activeTab === t.key
+                ? "border-[var(--color-accent)] text-[var(--color-accent-text)]"
+                : "border-transparent hover:text-[var(--color-fg-secondary)]"
             )}
           >
             {t.label}
@@ -88,94 +95,155 @@ export default function SettingsPage() {
 
       {/* Main grid */}
       <div className="dense-grid xl:grid-cols-[1fr_280px]">
-        {/* Left: Settings form */}
+        {/* Left: Settings form — conditional per tab */}
         <section className="panel-sq-dense flex flex-col gap-4 rounded-none overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-mid)] p-3 sm:p-4">
-          <span className="section-label block mb-0.5">Credentials & Scrape Defaults</span>
+          {activeTab === "llm-config" && (
+            <>
+              <span className="section-label block mb-0.5">LLM Configuration</span>
+              <LLMConfigPanel />
+            </>
+          )}
 
-          <form className="flex flex-col gap-4" onSubmit={form.handleSubmit((data) => saveMutation.mutate(toPayload(data)))}>
-            {/* API Key */}
-            <label className="flex flex-col gap-1">
-              <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Reddit API Key</span>
-              <ApiKeyInput value={apiKey ?? ""} onChange={(val) => form.setValue("apiKey", val as any)} provider="" />
-              {form.formState.errors.apiKey && (
-                <span className="text-[9px] text-[var(--color-danger-text)]">{form.formState.errors.apiKey.message}</span>
-              )}
-            </label>
-
-            {/* Row 1: Subreddit, Timeout, Depth */}
-            <div className="dense-grid md:grid-cols-3">
-              <label className="flex flex-col gap-1">
-                <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Default Subreddit</span>
-                <input {...form.register("defaultSubreddit")} className="input-sq rounded-none" />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Session Timeout (min)</span>
-                <input type="number" step="1" {...form.register("sessionTimeoutMinutes")} className="input-sq rounded-none" />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Default Depth</span>
-                <input type="number" step="1" {...form.register("defaultDepth")} className="input-sq rounded-none" />
-              </label>
-            </div>
-
-            {/* Row 2: Limit, Export Format, Checkbox */}
-            <div className="dense-grid md:grid-cols-3">
-              <label className="flex flex-col gap-1">
-                <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Default Limit</span>
-                <input type="number" step="1" {...form.register("defaultLimit")} className="input-sq rounded-none" />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Export Format</span>
-                <select {...form.register("exportFormat")} className="input-sq rounded-none bg-[var(--color-surface-high)] text-[var(--color-fg-primary)]">
-                  <option value="json">JSON</option>
-                  <option value="csv">CSV</option>
-                </select>
-              </label>
-              <div className="flex items-end pb-0.5">
-                <label className="flex items-center gap-1.5 text-[11px] text-[var(--color-fg-muted)] cursor-pointer bg-[var(--color-surface-high)] border border-[var(--color-border)] px-2 py-[5px] w-full hover:border-[var(--color-border-muted)] transition-colors rounded-none">
-                  <input type="checkbox" {...form.register("autoExport")} className="accent-accent-primary h-3 w-3 rounded-none" />
-                  <span>Auto-export after runs</span>
-                </label>
-              </div>
-            </div>
-
-            {/* Save button */}
-            <div className="flex items-center gap-2 pt-1">
-              <button type="submit" disabled={saveMutation.isPending} className="btn-sq btn-sq-primary rounded-none">
-                {saveMutation.isPending ? (
+          {(activeTab === "credentials" || activeTab === "users") && (
+            <>
+              <span className="section-label block mb-0.5">Credentials & Scrape Defaults</span>
+              <form className="flex flex-col gap-4" onSubmit={form.handleSubmit((data) => saveMutation.mutate(toPayload(data)))}>
+                {/* API Key */}
+                {activeTab === "credentials" && (
                   <>
-                    <LoaderCircle className="h-3.5 w-3.5 animate-spin mr-1" /> Saving…
-                  </>
-                ) : (
-                  <>
-                    <Save className="h-3.5 w-3.5 mr-1" /> Save Settings
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Reddit API Key</span>
+                      <ApiKeyInput value={apiKey ?? ""} onChange={(val) => form.setValue("apiKey", val as any)} provider="" />
+                      {form.formState.errors.apiKey && (
+                        <span className="text-[9px] text-[var(--color-danger-text)]">{form.formState.errors.apiKey.message}</span>
+                      )}
+                    </label>
+
+                    {/* Row 1: Subreddit, Timeout, Depth */}
+                    <div className="dense-grid md:grid-cols-3">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Default Subreddit</span>
+                        <input {...form.register("defaultSubreddit")} className="input-sq rounded-none" />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Session Timeout (min)</span>
+                        <input type="number" step="1" {...form.register("sessionTimeoutMinutes")} className="input-sq rounded-none" />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Default Depth</span>
+                        <input type="number" step="1" {...form.register("defaultDepth")} className="input-sq rounded-none" />
+                      </label>
+                    </div>
+
+                    {/* Row 2: Limit, Export Format, Checkbox */}
+                    <div className="dense-grid md:grid-cols-3">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Default Limit</span>
+                        <input type="number" step="1" {...form.register("defaultLimit")} className="input-sq rounded-none" />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Export Format</span>
+                        <select {...form.register("exportFormat")} className="input-sq rounded-none bg-[var(--color-surface-high)] text-[var(--color-fg-primary)]">
+                          <option value="json">JSON</option>
+                          <option value="csv">CSV</option>
+                        </select>
+                      </label>
+                      <div className="flex items-end pb-0.5">
+                        <label className="flex items-center gap-1.5 text-[11px] text-[var(--color-fg-muted)] cursor-pointer bg-[var(--color-surface-high)] border border-[var(--color-border)] px-2 py-[5px] w-full hover:border-[var(--color-border-muted)] transition-colors rounded-none">
+                          <input type="checkbox" {...form.register("autoExport")} className="accent-accent-primary h-3 w-3 rounded-none" />
+                          <span>Auto-export after runs</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Save button */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <button type="submit" disabled={saveMutation.isPending} className="btn-sq btn-sq-primary rounded-none">
+                        {saveMutation.isPending ? (
+                          <>
+                            <LoaderCircle className="h-3.5 w-3.5 animate-spin mr-1" /> Saving…
+                          </>
+                        ) : (
+                          <>
+                            <Save className="h-3.5 w-3.5 mr-1" /> Save Settings
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </>
                 )}
-              </button>
-            </div>
-          </form>
+
+                {/* Users tab — show user list in a table */}
+                {activeTab === "users" && (
+                  <section className="flex flex-col gap-3">
+                    <span className="text-[9px] text-[var(--color-fg-muted)]">Registered users with access to the crawler.</span>
+                    <div className="rounded-none overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-mid)]">
+                      <table className="w-full h-full table-auto text-left">
+                        <thead>
+                          <tr className="border-b border-[var(--color-border)]">
+                            <th className="px-3 py-2 text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">User</th>
+                            <th className="px-3 py-2 text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Email</th>
+                            <th className="px-3 py-2 text-[9px] font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Role</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {settingsQuery.data?.users.length ? settingsQuery.data?.users.map((user) => (
+                            <tr key={user.id} className="border-b border-[var(--color-border)]/50 last:border-0">
+                              <td className="px-3 py-2 text-[10px] font-medium text-[var(--color-fg-primary)]">{user.name}</td>
+                              <td className="px-3 py-2 text-[10px] text-[var(--color-fg-muted)]">{user.email}</td>
+                              <td className="px-3 py-2"><StatusBadge tone="neutral" label={user.role} /></td>
+                            </tr>
+                          )) : (
+                            <tr><td colSpan={3} className="text-center py-8 text-[var(--color-fg-muted)] text-xs">No users registered yet</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                )}
+              </form>
+            </>
+          )}
         </section>
 
-        {/* Right sidebar */}
+        {/* Right sidebar — show based on active tab */}
         <aside className="flex flex-col gap-3 h-fit">
-          <AuthForm />
-          <section className="panel-sq-dense rounded-none overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-mid)] px-3 py-2">
-            <span className="section-label block mb-1.5">Active Users</span>
-            <div className="flex flex-col divide-y divide-[var(--color-border)] -mx-px px-px">
-              {settingsQuery.data?.users.map((user) => (
-                <div key={user.id} className="flex items-center gap-2 py-[4px]">
-                  <div className="flex h-6 w-6 shrink-0 items-center justify-center bg-[var(--color-accent)]/10 border border-[var(--color-border-muted)] text-[8px] font-bold text-[var(--color-accent-text)] rounded-none">
-                    {user.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-medium leading-tight truncate text-[var(--color-fg-primary)]">{user.name}</p>
-                    <p className="text-[9px] text-[var(--color-fg-muted)] tabular-nums whitespace-nowrap">{user.email}</p>
-                  </div>
-                  <StatusBadge tone="neutral" label={user.role} />
+          {activeTab === "credentials" && (
+            <>
+              <AuthForm />
+              <section className="panel-sq-dense rounded-none overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-mid)] px-3 py-2">
+                <span className="section-label block mb-1.5">Active Users</span>
+                <div className="flex flex-col divide-y divide-[var(--color-border)] -mx-px px-px">
+                  {settingsQuery.data?.users.map((user) => (
+                    <div key={user.id} className="flex items-center gap-2 py-[4px]">
+                      <div className="flex h-6 w-6 shrink-0 items-center justify-center bg-[var(--color-accent)]/10 border border-[var(--color-border-muted)] text-[8px] font-bold text-[var(--color-accent-text)] rounded-none">
+                        {user.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] font-medium leading-tight truncate text-[var(--color-fg-primary)]">{user.name}</p>
+                        <p className="text-[9px] text-[var(--color-fg-muted)] tabular-nums whitespace-nowrap">{user.email}</p>
+                      </div>
+                      <StatusBadge tone="neutral" label={user.role} />
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </section>
+              </section>
+            </>
+          )}
+
+          {activeTab === "llm-config" && (
+            <section className="panel-sq-dense rounded-none overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-mid)] px-3 py-2">
+              <span className="section-label block mb-1.5">Provider Defaults</span>
+              <p className="text-[9px] text-[var(--color-fg-muted)] leading-relaxed">Select your LLM provider, enter the API key, and test connectivity before saving. Configuration is also persisted to localStorage.</p>
+            </section>
+          )}
+
+          {activeTab === "users" && (
+            <section className="panel-sq-dense rounded-none overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-mid)] px-3 py-2">
+              <span className="section-label block mb-1.5">Manage Users</span>
+              <p className="text-[9px] text-[var(--color-fg-muted)] leading-relaxed">Add or remove users who can access the crawler dashboard. Each user is assigned a role that determines their permissions.</p>
+            </section>
+          )}
         </aside>
       </div>
     </div>
