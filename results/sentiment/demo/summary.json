@@ -1,0 +1,34 @@
+{
+  "generated_at": "2026-06-04T16:33:52.127802",
+  "total_threads": 3,
+  "positive_count": 3,
+  "negative_count": 0,
+  "neutral_count": 0,
+  "overall_avg_compound": 0.4405,
+  "by_subreddit": {
+    "Python": {
+      "count": 1,
+      "avg_compound": 0.4405,
+      "positive_pct": 100.0,
+      "negative_pct": 0.0,
+      "neutral_pct": 0.0,
+      "std_compound": 0.0
+    },
+    "MachineLearning": {
+      "count": 1,
+      "avg_compound": 0.4405,
+      "positive_pct": 100.0,
+      "negative_pct": 0.0,
+      "neutral_pct": 0.0,
+      "std_compound": 0.0
+    },
+    "datascience": {
+      "count": 1,
+      "avg_compound": 0.4405,
+      "positive_pct": 100.0,
+      "negative_pct": 0.0,
+      "neutral_pct": 0.0,
+      "std_compound": 0.0
+    }
+  }
+}
