@@ -1,0 +1,20 @@
+{
+  "/_global-error/page": "app/_global-error/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/auth/login/route": "app/api/auth/login/route.js",
+  "/api/crawler/start/route": "app/api/crawler/start/route.js",
+  "/api/crawler/status/route": "app/api/crawler/status/route.js",
+  "/api/crawler/stop/route": "app/api/crawler/stop/route.js",
+  "/api/data/comments/route": "app/api/data/comments/route.js",
+  "/api/data/export/route": "app/api/data/export/route.js",
+  "/api/data/posts/route": "app/api/data/posts/route.js",
+  "/api/settings/route": "app/api/settings/route.js",
+  "/api/stats/route": "app/api/stats/route.js",
+  "/controls/page": "app/controls/page.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/data/page": "app/data/page.js",
+  "/design-system/page": "app/design-system/page.js",
+  "/favicon.ico/route": "app/favicon.ico/route.js",
+  "/page": "app/page.js",
+  "/settings/page": "app/settings/page.js"
+}

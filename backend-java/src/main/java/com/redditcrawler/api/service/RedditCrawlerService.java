@@ -161,21 +161,14 @@ public class RedditCrawlerService {
                     }
                 }
 
-                // Store posts as the primary results.
+                // Store posts and comments atomically.
                 if (redisAvailable.get()) {
                     redisCache.updateResults(jobId, crawledPosts);
-                    // Also store comments on a secondary key.
                     redisCache.updateComments(jobId, allComments);
+                    redisCache.updateStatus(jobId, "COMPLETED");
                 } else {
                     jobStore.updateResults(jobId, crawledPosts);
                     jobStore.updateComments(jobId, allComments);
-                    jobStore.updateStatus(jobId, "COMPLETED");
-                }
-
-                if (redisAvailable.get()) {
-                    redisCache.updateResults(jobId, crawledPosts);
-                } else {
-                    jobStore.updateResults(jobId, crawledPosts);
                     jobStore.updateStatus(jobId, "COMPLETED");
                 }
             } else {

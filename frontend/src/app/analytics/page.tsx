@@ -1,38 +1,36 @@
 "use client"
 
-// src/app/analytics/page.tsx — Real-time analytics dashboard with recharts
+// src/app/analytics/page.tsx — Real-time analytics dashboard
+// Fixed: replaced broken @/hooks/use-analytics (useHeatmap / useKeywords)
+// with inline useAnalytics() custom hook that polls http://localhost:8080/api/analysis/*
 
-import React, { useState, useEffect, useMemo } from "react"
-import { useHeatmap, useKeywords } from "@/hooks/use-analytics"
+import React, { useState, useMemo } from "react"
 import { 
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList 
 } from "recharts"
-import type { SubredditStats, ThreadInsight, AnalyticsData } from "@/lib/mock-analytics"
-import { generateMockAnalyticsData } from "@/lib/mock-analytics"
 import { 
   BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, 
-  Search, RefreshCw, Download, Filter, Users, Globe, TrendingUp, MessageSquare,
+  Search, RefreshCw, Globe, TrendingUp, MessageSquare,
   Target, Lightbulb, Briefcase, Database, Star
 } from "lucide-react"
+import { useAnalytics } from "@/hooks/useAnalytics"
+
 // ============================================================================
 // Inline UI Components (no separate file needed)
 // ============================================================================
 
-// Simple inline section header — avoids icon ForwardRef typing issues
-function SectionHeader(props: { title: string; icon?: any }) {
+function SectionHeader(props: { title: string }) {
   return (
     <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-      {props.icon && (<span className="h-4 w-4">{typeof props.icon}</span>)}
       <span className="font-medium">{props.title}</span>
     </div>
-  );
+  )
 }
 
-// Color palette generator for pie charts (HSL-based, evenly distributed hues)
 function huePalette(idx: number, total: number): string {
-  const angle = Math.round((idx / Math.max(total - 1, 1)) * 360);
-  return `hsl(${angle}, 70%, 55%)`;
+  const angle = Math.round((idx / Math.max(total - 1, 1)) * 360)
+  return `hsl(${angle}, 70%, 55%)`
 }
 
 function ChartSkeleton() {
@@ -40,173 +38,23 @@ function ChartSkeleton() {
     <div className="panel-inset flex h-32 items-center justify-center rounded-md border border-dashed border-gray-300 dark:border-gray-700 text-sm text-gray-500">
       Loading chart...
     </div>
-  );
-}
-
-
-// Colors for charts
-const COLORS = ['#0ea5e9', '#8b5cf6', '#f43f5e', '#10b981', '#f59e0b', '#ec4899', '#6366f1'] as const
-const SENTIMENT_COLORS: Record<string, string> = {
-  Positive: '#10b981',
-  Neutral: '#64748b',
-  Negative: '#ef4444'
-}
-
-// ---------------------------------------------------------------------------
-// Section A: Sentiment Analysis Charts (heatmap stacked bars)
-// ---------------------------------------------------------------------------
-
-function SentimentChart() {
-  const { data: heatmap } = useHeatmap();
-
-  if (!heatmap || heatmap.length === 0) {
-    return (
-      <div className="panel-sq-dense p-4 flex flex-col gap-3">
-        <SectionHeader icon={Database} title="Sentiment Distribution" />
-        <ChartSkeleton />
-      </div>
-    );
-  }
-
-  const chartData = heatmap.map((h) => ({
-    subreddit: h.subreddit,
-    positive: h.positivePercent || 0,
-    neutral: h.neutralPercent || 0,
-    negative: h.negativePercent || 0,
-    positiveCount: h.positive || 0,
-    neutralCount: h.neutral || 0,
-    negativeCount: h.negative || 0,
-    total: h.total || 0,
-  }));
-
-  const customTooltip = ({ active, payload }: any) => {
-    if (!active || !payload?.[0]) return null;
-    const item = payload[0].payload as typeof chartData[0];
-    return (
-      <div className="panel-sq-dense p-3 text-xs border border-[var(--color-border)] bg-[var(--color-bg-base)] shadow-lg">
-        <p className="font-semibold mb-1">{item.subreddit}</p>
-        <div className="flex flex-col gap-0.5 font-mono tabular-nums">
-          <span className="text-[#22c55e]">▲ Pos</span>
-          <span>{item.positiveCount}/{item.total} ({item.positive.toFixed(1)}%)</span>
-        </div>
-        <div className="flex flex-col gap-0.5 font-mono tabular-nums">
-          <span className="text-[#a1a1aa]">● Neu</span>
-          <span>{item.neutralCount}/{item.total} ({item.neutral.toFixed(1)}%)</span>
-        </div>
-        <div className="flex flex-col gap-0.5 font-mono tabular-nums border-t border-[var(--color-border)] mt-1 pt-1">
-          <span className="text-[#ef4444]">▼ Neg</span>
-          <span>{item.negativeCount}/{item.total} ({item.negative.toFixed(1)}%)</span>
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <div className="panel-sq-dense p-4 flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <SectionHeader icon={Database} title="Sentiment Distribution (% of total)" />
-        <span className="text-[9px] text-[var(--color-fg-muted)]">Stacked to 100%</span>
-      </div>
-      <ResponsiveContainer width="100%" height={320}>
-        <BarChart data={chartData} barGap={0}>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-          <XAxis dataKey="subreddit" tick={{ fontSize: 10, fill: "var(--color-fg-muted)" }} axisLine={{ stroke: "var(--color-border)" }} tickLine={false} />
-          <YAxis tick={{ fontSize: 10, fill: "var(--color-fg-muted)" }} axisLine={false} tickLine={false} domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} />
-          <Tooltip content={customTooltip} />
-          <Legend wrapperStyle={{ fontSize: 11 }} formatter={() => null} />
-          <Bar dataKey="positive" stackId="sentiment" fill="#22c55e" name="Positive" />
-          <Bar dataKey="neutral" stackId="sentiment" fill="#a1a1aa" name="Neutral" />
-          <Bar dataKey="negative" stackId="sentiment" fill="#ef4444" name="Negative" />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Section B: Keyword Frequency Word Cloud (PieChart + RadialBar)
-// ---------------------------------------------------------------------------
-
-function KeywordWordCloud() {
-  const { data: keywords } = useKeywords(30);
-
-  const pieData = useMemo(() => {
-    if (!keywords || keywords.length === 0) return [];
-    return keywords.map((kw, i) => ({ name: kw.keyword.length > 12 ? kw.keyword.slice(0, 12) + "…" : kw.keyword, value: kw.frequency, color: huePalette(i, keywords.length) }));
-  }, [keywords]);
-
-  if (!keywords || keywords.length === 0) {
-    return (
-      <div className="panel-sq-dense p-4 flex flex-col gap-3">
-        <SectionHeader icon={Star} title="Keyword Frequency" />
-        <ChartSkeleton />
-      </div>
-    );
-  }
-
-  return (
-    <div className="panel-sq-dense p-4 flex flex-col gap-3">
-      <SectionHeader icon={Star} title="Keyword Frequency" />
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_280px] gap-4 items-start">
-        {/* Pie chart */}
-        <ResponsiveContainer width="100%" height={320}>
-          <PieChart>
-            <Pie
-              data={pieData}
-              cx="50%"
-              cy="50%"
-              innerRadius={60}
-              outerRadius={140}
-              paddingAngle={2}
-              dataKey="value"
-              animationDuration={600}
-            >
-              {pieData.map((entry, i) => (
-                <Cell key={`cell-${i}`} fill={entry.color} stroke="var(--color-bg-base)" strokeWidth={1} />
-              ))}
-              <LabelList position="outside" fill="var(--color-fg-secondary)" fontSize={10} stroke="none" dataKey="name" />
-            </Pie>
-            <Tooltip
-              contentStyle={{ backgroundColor: "var(--color-surface-high)", border: "1px solid var(--color-border)", borderRadius: 0, color: "var(--color-fg-primary)", fontSize: 12 }}
-              formatter={(_value: unknown) => [String(_value), "frequency"]}
-            />
-          </PieChart>
-        </ResponsiveContainer>
-
-        {/* Keyword frequency list (side panel) */}
-        <div className="flex flex-col gap-1.5 h-full overflow-auto">
-          {(pieData || []).map((kw, i) => {
-            const original = keywords[i];
-            const displayWidth = pieData.length > 0 ? Math.min(pieData[i].value / (pieData[0].value || 1), 1) * 100 : 0;
-            return (
-              <div key={i} className="flex items-center gap-1.5 text-[10px]">
-                {/* Color dot */}
-                <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: pieData[i].color }} />
-                {/* Keyword name (full, shown) */}
-                <span className="truncate font-mono tabular-nums min-w-0 flex-shrink text-[var(--color-fg-secondary)]">{original.keyword}</span>
-                {/* Count + relative bar */}
-                <div className="flex items-end gap-1 shrink-0 w-[60px]">
-                  <span className="tabular-nums text-[9px] text-[var(--color-fg-muted)]">{pieData[i].value}</span>
-                  <div className="h-1 w-full bg-[var(--color-border)] rounded">
-                    <div className="h-full rounded transition-all" style={{ width: `${displayWidth}%`, backgroundColor: pieData[i].color }} />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
   )
 }
 
-function Badge({ children, color }: { children: React.ReactNode; color: 'emerald' | 'pink' | 'slate' | 'amber' | 'sky' }) {
+const COLORS = ["#0ea5e9", "#8b5cf6", "#f43f5e", "#10b981", "#f59e0b", "#ec4899", "#6366f1"] as const
+const SENTIMENT_COLORS: Record<string, string> = {
+  Positive: "#10b981",
+  Neutral: "#64748b",
+  Negative: "#ef4444"
+}
+
+function Badge({ children, color }: { children: React.ReactNode; color: "emerald" | "pink" | "slate" | "amber" | "sky" }) {
   const colors = {
-    emerald: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    pink: 'bg-pink-500/10 text-pink-400 border-pink-500/20',
-    slate: 'bg-slate-500/10 text-slate-400 border-slate-500/20',
-    amber: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    sky: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
+    emerald: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    pink: "bg-pink-500/10 text-pink-400 border-pink-500/20",
+    slate: "bg-slate-500/10 text-slate-400 border-slate-500/20",
+    amber: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    sky: "bg-sky-500/10 text-sky-400 border-sky-500/20",
   }
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 border ${colors[color]} rounded text-[10px] uppercase tracking-wider`}>
@@ -215,17 +63,17 @@ function Badge({ children, color }: { children: React.ReactNode; color: 'emerald
   )
 }
 
-// ===== Stat Card Component (inline UI element for stats grid) =====
+// ===== Stat Card Component =====
 function StatCard({ icon, label, value, change, trend }: {
-  icon?: any;
+  icon?: React.ReactNode;
   label: string;
   value: string | number;
   change: string;
-  trend: 'up' | 'down' | 'neutral';
+  trend: "up" | "down" | "neutral"
 }) {
-  const colors = { up: 'text-emerald-400', down: 'text-rose-400', neutral: 'text-blue-400' } as const;
+  const colors = { up: "text-emerald-400", down: "text-rose-400", neutral: "text-blue-400" } as const
   return (
-    <div className={`panel-inset rounded-md p-3 flex flex-col gap-1 ${trend === 'neutral' ? '' : ''}`}>
+    <div className="panel-inset rounded-md p-3 flex flex-col gap-1">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{label}</span>
         <div className="h-7 w-7 flex items-center justify-center rounded border border-gray-700/50 bg-white/5">
@@ -235,7 +83,7 @@ function StatCard({ icon, label, value, change, trend }: {
       <p className="text-lg font-medium text-gray-900 dark:text-white">{value}</p>
       <span className={`text-[10px] ${colors[trend]} tracking-wide`}>{change}</span>
     </div>
-  );
+  )
 }
 
 function TabsNav({ defaultValue, tabs, contentPanels }: { 
@@ -253,8 +101,8 @@ function TabsNav({ defaultValue, tabs, contentPanels }: {
             onClick={() => setActive(t.value)}
             className={`px-3 py-2 text-[11px] font-medium whitespace-nowrap transition-all rounded-sm ${
               active === t.value
-                ? 'bg-sky-500 text-white'
-                : 'text-slate-400 hover:text-white'
+                ? "bg-sky-500 text-white"
+                : "text-slate-400 hover:text-white"
             }`}
           >
             {t.label}
@@ -266,34 +114,195 @@ function TabsNav({ defaultValue, tabs, contentPanels }: {
   )
 }
 
-// ===== MAIN PAGE =====
+function SentimentChart({ heatmap }: { heatmap: Array<{ subreddit: string; positivePercent?: number; neutralPercent?: number; negativePercent?: number; positive?: number; neutral?: number; negative?: number; total?: number }> }) {
+  const customTooltip = ({ active, payload }: any) => {
+    if (!active || !payload?.[0]) return null
+    const item = payload[0].payload as typeof heatmap[0]
+    return (
+      <div className="panel-sq-dense p-3 text-xs border border-[var(--color-border)] bg-[var(--color-bg-base)] shadow-lg">
+        <p className="font-semibold mb-1">{item.subreddit}</p>
+        <div className="flex flex-col gap-0.5 font-mono tabular-nums">
+          <span className="text-[#22c55e]">▲ Pos</span>
+          <span>{item.positive}/{item.total} ({item.positivePercent?.toFixed(1)}%)</span>
+        </div>
+        <div className="flex flex-col gap-0.5 font-mono tabular-nums border-t border-[var(--color-border)] mt-1 pt-1">
+          <span className="text-[#a1a1aa]">● Neu</span>
+          <span>{item.neutral}/{item.total} ({item.neutralPercent?.toFixed(1)}%)</span>
+        </div>
+        <div className="flex flex-col gap-0.5 font-mono tabular-nums border-t border-[var(--color-border)] mt-1 pt-1">
+          <span className="text-[#ef4444]">▼ Neg</span>
+          <span>{item.negative}/{item.total} ({item.negativePercent?.toFixed(1)}%)</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (!heatmap || heatmap.length === 0) return null
+
+  const chartData = heatmap.map((h) => ({
+    subreddit: h.subreddit,
+    positive: h.positivePercent ?? 0,
+    neutral: h.neutralPercent ?? 0,
+    negative: h.negativePercent ?? 0,
+    positiveCount: h.positive ?? 0,
+    neutralCount: h.neutral ?? 0,
+    negativeCount: h.negative ?? 0,
+    total: h.total ?? 0,
+  }))
+
+  return (
+    <div className="panel-sq-dense p-4 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <SectionHeader title="Sentiment Distribution (% of total)" />
+        <span className="text-[9px] text-[var(--color-fg-muted)]">Stacked to 100%</span>
+      </div>
+      <ResponsiveContainer width="100%" height={320}>
+        <BarChart data={chartData} barGap={0}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+          <XAxis dataKey="subreddit" tick={{ fontSize: 10, fill: "var(--color-fg-muted)" }} axisLine={{ stroke: "var(--color-border)" }} tickLine={false} />
+          <YAxis tick={{ fontSize: 10, fill: "var(--color-fg-muted)" }} axisLine={false} tickLine={false} domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} />
+          <Tooltip content={customTooltip} />
+          <Legend wrapperStyle={{ fontSize: 11 }} formatter={() => null} />
+          <Bar dataKey="positive" stackId="sentiment" fill="#22c55e" name="Positive" />
+          <Bar dataKey="neutral" stackId="sentiment" fill="#a1a1aa" name="Neutral" />
+          <Bar dataKey="negative" stackId="sentiment" fill="#ef4444" name="Negative" />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+function KeywordWordCloud({ keywords }: { keywords: Array<{ keyword: string; frequency: number }> }) {
+  const pieData = useMemo(() => {
+    if (!keywords || keywords.length === 0) return []
+    return keywords.map((kw: any, i: number) => ({ name: kw.keyword.length > 12 ? kw.keyword.slice(0, 12) + "…" : kw.keyword, value: kw.frequency, color: huePalette(i, keywords.length) }))
+  }, [keywords])
+
+  if (!keywords || keywords.length === 0) return null
+
+  return (
+    <div className="panel-sq-dense p-4 flex flex-col gap-3">
+      <SectionHeader title="Keyword Frequency" />
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_280px] gap-4 items-start">
+        {/* Pie chart */}
+        <ResponsiveContainer width="100%" height={320}>
+          <PieChart>
+            <Pie
+              data={pieData}
+              cx="50%"
+              cy="50%"
+              innerRadius={60}
+              outerRadius={140}
+              paddingAngle={2}
+              dataKey="value"
+              animationDuration={600}
+            >
+              {pieData.map((entry: any, i: number) => (
+                <Cell key={`cell-${i}`} fill={entry.color} stroke="var(--color-bg-base)" strokeWidth={1} />
+              ))}
+              <LabelList position="outside" fill="var(--color-fg-secondary)" fontSize={10} stroke="none" dataKey="name" />
+            </Pie>
+            <Tooltip
+              contentStyle={{ backgroundColor: "var(--color-surface-high)", border: "1px solid var(--color-border)", borderRadius: 0, color: "var(--color-fg-primary)", fontSize: 12 }}
+              formatter={(_value: unknown) => [String(_value), "frequency"]}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+
+        {/* Keyword frequency list (side panel) */}
+        <div className="flex flex-col gap-1.5 h-full overflow-auto">
+          {(pieData || []).map((kw: any, i: number) => {
+            const original = keywords[i]
+            const displayWidth = pieData.length > 0 ? Math.min(pieData[i].value / (pieData[0].value || 1), 1) * 100 : 0
+            return (
+              <div key={i} className="flex items-center gap-1.5 text-[10px]">
+                <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: pieData[i].color }} />
+                <span className="truncate font-mono tabular-nums min-w-0 flex-shrink text-[var(--color-fg-secondary)]">{original.keyword}</span>
+                <div className="flex items-end gap-1 shrink-0 w-[60px]">
+                  <span className="tabular-nums text-[9px] text-[var(--color-fg-muted)]">{pieData[i].value}</span>
+                  <div className="h-1 w-full bg-[var(--color-border)] rounded">
+                    <div className="h-full rounded transition-all" style={{ width: `${displayWidth}%`, backgroundColor: pieData[i].color }} />
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// MAIN PAGE
+// ============================================================================
+
 export default function AnalyticsPage() {
-  const [analyticsData] = useState<AnalyticsData>(generateMockAnalyticsData)
-  const [lastUpdated, setLastUpdated] = useState(new Date())
+  const { data, loading, error, lastUpdated, apiReachable } = useAnalytics()
   const [searchQuery, setSearchQuery] = useState("")
 
-  useEffect(() => {
-    const interval = setInterval(() => setLastUpdated(new Date()), 5_000)
-    return () => clearInterval(interval)
-  }, [])
+  // When data is still loading we keep the page skeleton rendered;
+  // analytics charts will render as skeletons until data arrives.
+  if (loading || !data) {
+    return (
+      <div className="flex flex-col w-full gap-6 p-8 bg-gradient-to-br from-black via-gray-950 to-black text-white min-h-screen">
+        <section className="flex items-start justify-between mb-2 flex-wrap gap-3">
+          <div>
+            <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-sky-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
+              Reddit Analytics Dashboard
+            </h1>
+            <p className="text-sm text-gray-400 mt-2 max-w-xl leading-relaxed">
+              Loading real-time analytics from the backend crawler API…
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">
+            <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse" />
+            LOADING
+          </span>
+        </section>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className="panel-inset rounded-md p-3 flex flex-col gap-2 h-28 animate-pulse bg-gray-900/40 border border-gray-800" />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  const { subredditStats, dailyActivity, sentimentDistribution, topKeywords, insights, weeklyCrawl } = data
 
   // Insights filtering
-  const filteredInsights = analyticsData.insights.filter(
-    insight =>
+  const filteredInsights = insights.filter(
+    (insight: any) =>
       insight.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       insight.subtitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
       insight.keywords.some((k: string) => k.toLowerCase().includes(searchQuery.toLowerCase()))
   )
 
   // Sort subreddits by total activity
-  const sortedSubs = [...analyticsData.subredditStats].sort(
-    (a, b) => (b.postCount + b.commentCount) - (a.postCount + a.commentCount)
+  const sortedSubs = [...subredditStats].sort(
+    (a: any, b: any) => (b.postCount + b.commentCount) - (a.postCount + a.commentCount)
   )
 
-  const totalSentiment = analyticsData.sentimentDistribution.reduce((s, d) => s + d.count, 0)
+  const totalSentiment = sentimentDistribution.reduce((s: number, d: any) => s + d.count, 0)
   const positivePct = totalSentiment > 0 
-    ? ((analyticsData.sentimentDistribution.find(d => d.label === 'Positive')?.count || 0) / totalSentiment * 100).toFixed(1)
-    : '0'
+    ? ((sentimentDistribution.find((d: any) => d.label === "Positive")?.count || 0) / totalSentiment * 100).toFixed(1)
+    : "0"
+
+  // Map the heatmap-style data from subredditStats for SentimentChart
+  const heatmapData = subredditStats.map(sub => ({
+    subreddit: sub.subreddit.replace("r/", ""),
+    positivePercent: sub.positivePercent,
+    neutralPercent: sub.neutralPercent,
+    negativePercent: sub.negativePercent,
+    positive: sub.postCount * (sub.positivePercent ?? 0) / 100,
+    neutral: sub.postCount * (sub.neutralPercent ?? 0) / 100,
+    negative: sub.postCount * (sub.negativePercent ?? 0) / 100,
+    total: sub.subreddit ? Math.round(sub.postCount + sub.commentCount) : 0,
+  }))
+
+  // Keywords for word-cloud component
+  const keywordsData = topKeywords.map((kw: any, i: number) => ({ keyword: kw.term, frequency: kw.frequency }))
 
   return (
     <div className="flex flex-col w-full gap-6 p-8 bg-gradient-to-br from-black via-gray-950 to-black text-white min-h-screen">
@@ -304,14 +313,20 @@ export default function AnalyticsPage() {
             Reddit Analytics Dashboard
           </h1>
           <p className="text-sm text-gray-400 mt-2 max-w-xl leading-relaxed">
-            Real-time crawling insights, sentiment analysis &amp; project opportunity discovery from {analyticsData.subredditStats.length} tracked subreddits. 
+            Real-time crawling insights, sentiment analysis &amp; project opportunity discovery from {subredditStats.length} tracked subreddits.
             Updated automatically every 5 seconds.
           </p>
         </div>
         <div className="flex gap-3 items-center shrink-0">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-            <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
-            LIVE
+          <span className={`inline-flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium rounded border ${
+            apiReachable
+              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+              : "bg-amber-500/10 text-amber-400 border-amber-500/30"
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${
+              apiReachable ? "bg-emerald-400" : "bg-amber-400"
+            }`} />
+            {apiReachable ? "LIVE" : "STANDBY"}
           </span>
           <span className="text-[10px] text-gray-500 uppercase tracking-wider">
             Last sync: {lastUpdated.toLocaleTimeString()}
@@ -324,44 +339,43 @@ export default function AnalyticsPage() {
         <StatCard
           icon={<Globe className="w-5 h-5 text-sky-400" />}
           label="Tracked Subreddits"
-          value={analyticsData.subredditStats.length}
+          value={subredditStats.length}
           change="+3 this week"
           trend="up"
         />
         <StatCard
           icon={<MessageSquare className="w-5 h-5 text-purple-400" />}
           label="Total Posts Crawled"
-          value={analyticsData.subredditStats.reduce((s, r) => s + r.postCount, 0).toLocaleString()}
+          value={subredditStats.reduce((s: number, r: any) => s + r.postCount, 0).toLocaleString()}
           change="+12% from last week"
           trend="up"
         />
         <StatCard
-          icon={<Users className="w-5 h-5 text-pink-400" />}
-          label="Positive Sentiment Ratio"
+          icon={<Star className="w-5 h-5 text-pink-400" />}
+          label="Positive Sentiment"
           value={`${positivePct}%`}
           change="Trending up"
-          trend="up"
+          trend={parseFloat(positivePct) > 40 ? "up" : "neutral"}
         />
         <StatCard
           icon={<Lightbulb className="w-5 h-5 text-amber-400" />}
           label="Opportunities Found"
-          value={analyticsData.insights.length}
+          value={insights.length}
           change="Requires action"
           trend="neutral"
         />
       </div>
 
-      {/* TABS */}
+      {/* TabsNav */}
       <TabsNav
         defaultValue="overview"
         tabs={[
-          { value: 'overview', label: <><BarChart3 className="inline w-3.5 h-3.5 mr-1" /> Overview</> },
-          { value: 'sentiment', label: <><PieChartIcon className="inline w-3.5 h-3.5 mr-1" /> Sentiment Breakdown</> },
-          { value: 'keywords', label: <><TrendingUp className="inline w-3.5 h-3.5 mr-1" /> Top Keywords</> },
-          { value: 'insights', label: <><Target className="inline w-3.5 h-3.5 mr-1" /> Insights & Ideas</> },
+          { value: "overview", label: <><BarChart3 className="inline w-3.5 h-3.5 mr-1" /> Overview</> },
+          { value: "sentiment", label: <><PieChartIcon className="inline w-3.5 h-3.5 mr-1" /> Sentiment Breakdown</> },
+          { value: "keywords", label: <><TrendingUp className="inline w-3.5 h-3.5 mr-1" /> Top Keywords</> },
+          { value: "insights", label: <><Target className="inline w-3.5 h-3.5 mr-1" /> Insights & Ideas</> },
         ]}
         contentPanels={{
-
           // ========== OVERVIEW TAB ==========
           overview: (
             <div className="space-y-8">
@@ -373,21 +387,21 @@ export default function AnalyticsPage() {
                     <TrendingUp className="w-4 h-4 text-emerald-400" /> Daily Activity Trend (30 days)
                   </h3>
                   <ResponsiveContainer width="100%" height={280}>
-                    <LineChart data={analyticsData.dailyActivity}>
+                    <LineChart data={dailyActivity}>
                       <CartesianGrid strokeDasharray="3 3" className="stroke-gray-700/40" />
                       <XAxis 
                         dataKey="date" 
-                        tick={{ fill: '#94a3b8', fontSize: 10 }} 
+                        tick={{ fill: "#94a3b8", fontSize: 10 }} 
                         tickFormatter={(v: string) => v.slice(5)} 
                         axisLine={false} 
                         tickLine={false} 
                         interval={4}
                         minTickGap={20}
                       />
-                      <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} />
                       <Tooltip 
-                        contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, color: '#fff', fontSize: 11, boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }} 
-                        labelStyle={{ color: '#94a3b8', fontWeight: 'bold' }}
+                        contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: 6, color: "#fff", fontSize: 11, boxShadow: "0 4px 12px rgba(0,0,0,0.5)" }} 
+                        labelStyle={{ color: "#94a3b8", fontWeight: "bold" }}
                       />
                       <Legend wrapperStyle={{ fontSize: 10, paddingTop: 4 }} iconType="circle" />
                       <Line type="monotone" dataKey="posts" stroke="#0ea5e9" strokeWidth={2.5} name="Posts" dot={false} activeDot={{ r: 5 }} />
@@ -406,7 +420,7 @@ export default function AnalyticsPage() {
                       <CartesianGrid strokeDasharray="3 3" className="stroke-gray-700/40" />
                       <XAxis 
                         dataKey="subreddit" 
-                        tick={{ fill: '#94a3b8', fontSize: 9 }} 
+                        tick={{ fill: "#94a3b8", fontSize: 9 }} 
                         axisLine={false} 
                         tickLine={false} 
                         interval={0} 
@@ -416,10 +430,10 @@ export default function AnalyticsPage() {
                         height={55}
                         minTickGap={20}
                       />
-                      <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} />
                       <Tooltip 
-                        contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, color: '#fff', fontSize: 11 }} 
-                        labelStyle={{ color: '#94a3b8' }}
+                        contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: 6, color: "#fff", fontSize: 11 }} 
+                        labelStyle={{ color: "#94a3b8" }}
                       />
                       <Legend wrapperStyle={{ fontSize: 10 }} iconType="circle" />
                       <Bar dataKey="postCount" fill="#0ea5e9" name="Posts" radius={[6, 6, 0, 0]} />
@@ -437,7 +451,7 @@ export default function AnalyticsPage() {
                   <ResponsiveContainer width="100%" height={220}>
                     <PieChart>
                       <Pie
-                        data={analyticsData.sentimentDistribution}
+                        data={sentimentDistribution}
                         cx="50%"
                         cy="50%"
                         outerRadius={80}
@@ -446,17 +460,17 @@ export default function AnalyticsPage() {
                         dataKey="count"
                         labelLine={false}
                       >
-                        {analyticsData.sentimentDistribution.map((entry: any, i: number) => (
+                        {sentimentDistribution.map((entry: any, i: number) => (
                           <Cell key={`cell-${i}`} fill={SENTIMENT_COLORS[entry.label] || COLORS[i % COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, color: '#fff' }} />
+                      <Tooltip contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: 6, color: "#fff" }} />
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="flex justify-center gap-4 mt-3">
-                    {analyticsData.sentimentDistribution.map((entry: any) => (
+                    {sentimentDistribution.map((entry: any) => (
                       <span key={entry.label} className="flex items-center gap-1.5 text-xs">
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: SENTIMENT_COLORS[entry.label] || '#8884d8' }} />
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: SENTIMENT_COLORS[entry.label] || "#8884d8" }} />
                         <span className="text-gray-400">{entry.label}</span>
                       </span>
                     ))}
@@ -467,17 +481,17 @@ export default function AnalyticsPage() {
                     <Briefcase className="w-4 h-4 text-sky-400" /> Weekly Crawl Volume (articles collected per day)
                   </h3>
                   <ResponsiveContainer width="100%" height={280}>
-                    <BarChart data={analyticsData.weeklyCrawl}>
+                    <BarChart data={weeklyCrawl}>
                       <CartesianGrid strokeDasharray="3 3" className="stroke-gray-700/40" />
-                      <XAxis dataKey="day" tick={{ fill: '#94a3b8', fontSize: 12 }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
+                      <XAxis dataKey="day" tick={{ fill: "#94a3b8", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} />
                       <Tooltip 
-                        contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, color: '#fff', fontSize: 11 }} 
-                        labelStyle={{ color: '#94a3b8' }}
+                        contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: 6, color: "#fff", fontSize: 11 }} 
+                        labelStyle={{ color: "#94a3b8" }}
                       />
                       <Legend wrapperStyle={{ fontSize: 10 }} iconType="circle" />
                       <Bar dataKey="collected" name="Articles Crawled" radius={[6, 6, 0, 0]}>
-                        {analyticsData.weeklyCrawl.map((_, i) => (
+                        {weeklyCrawl.map((_: any, i: number) => (
                           <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />
                         ))}
                       </Bar>
@@ -501,18 +515,18 @@ export default function AnalyticsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedSubs.slice(0, 5).map(sub => (
+                      {sortedSubs.slice(0, 5).map((sub: any) => (
                         <tr key={sub.subreddit} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
                           <td className="py-3 text-sm font-medium text-white">{sub.subreddit}</td>
                           <td className="py-3 text-sm text-gray-300 text-right tabular-nums">{sub.postCount.toLocaleString()}</td>
                           <td className="py-3 text-sm text-gray-300 text-right tabular-nums">{sub.commentCount.toLocaleString()}</td>
                           <td className="py-3 text-center">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium ${
-                              sub.sentimentScore > 0 ? 'bg-emerald-500/10 text-emerald-400' : 
-                              sub.sentimentScore < 0 ? 'bg-pink-500/10 text-pink-400' : 
-                              'bg-slate-500/10 text-slate-400'
+                              sub.sentimentScore > 0 ? "bg-emerald-500/10 text-emerald-400" : 
+                              sub.sentimentScore < 0 ? "bg-pink-500/10 text-pink-400" : 
+                              "bg-slate-500/10 text-slate-400"
                             }`}>
-                              {sub.sentimentScore > 0 ? '+' : ''}{sub.sentimentScore}
+                              {sub.sentimentScore > 0 ? "+" : ""}{sub.sentimentScore}
                             </span>
                           </td>
                           <td className="py-3 text-sm text-gray-300 text-right tabular-nums">{sub.avgThreadsDay}</td>
@@ -527,29 +541,9 @@ export default function AnalyticsPage() {
 
           // ========== SENTIMENT TAB ==========
           sentiment: (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {analyticsData.subredditStats.map((sub) => (
-                <div 
-                  key={sub.subreddit} 
-                  className={`bg-gray-900/60 border rounded-lg p-5 transition-colors hover:border-sky-500/30 cursor-default ${
-                    sub.sentimentScore > 0 ? 'border-emerald-500/30' : 
-                    sub.sentimentScore < 0 ? 'border-pink-500/30' : 
-                    'border-gray-800'
-                  }`}
-                >
-                  <div className="flex items-start justify-between mb-4">
-                    <h3 className="text-sm font-semibold text-white">{sub.subreddit}</h3>
-                    <Badge color={sub.sentimentScore > 0 ? 'emerald' : sub.sentimentScore < 0 ? 'pink' : 'slate'}>
-                      {sub.sentimentScore > 0 ? '+' : ''}{sub.sentimentScore} Sentiment
-                    </Badge>
-                  </div>
-                  <div className="grid grid-cols-3 gap-4 text-xs">
-                    <div><span className="text-gray-500 block mb-1">Posts</span><p className="text-white font-medium text-base">{sub.postCount.toLocaleString()}</p></div>
-                    <div><span className="text-gray-500 block mb-1">Comments</span><p className="text-white font-medium text-base">{sub.commentCount.toLocaleString()}</p></div>
-                    <div><span className="text-gray-500 block mb-1">Threads/Day</span><p className="text-white font-medium text-base">{sub.avgThreadsDay}</p></div>
-                  </div>
-                </div>
-              ))}
+            <div className="space-y-6">
+              <SentimentChart heatmap={heatmapData} />
+              <KeywordWordCloud keywords={keywordsData} />
             </div>
           ),
 
@@ -559,23 +553,23 @@ export default function AnalyticsPage() {
               <div className="bg-gray-900/60 border border-gray-800 rounded-lg p-5">
                 <h3 className="text-sm font-semibold mb-4 text-white">Top Extracted Keywords & Themes by Frequency</h3>
                 <ResponsiveContainer width="100%" height={350}>
-                  <BarChart layout="vertical" data={analyticsData.topKeywords} margin={{ left: 40 }}>
+                  <BarChart layout="vertical" data={topKeywords} margin={{ left: 40 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-gray-700/40" orientation="vertical" />
-                    <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <XAxis type="number" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis 
                       dataKey="term" 
                       type="category" 
-                      tick={{ fill: '#fff', fontSize: 13, fontWeight: '600' }} 
+                      tick={{ fill: "#fff", fontSize: 13, fontWeight: "600" }} 
                       width={95} 
                       axisLine={false} 
                       tickLine={false} 
                     />
                     <Tooltip 
-                      contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, color: '#fff', fontSize: 11 }} 
-                      labelStyle={{ color: '#94a3b8' }}
+                      contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: 6, color: "#fff", fontSize: 11 }} 
+                      labelStyle={{ color: "#94a3b8" }}
                     />
                     <Bar dataKey="frequency" name="Frequency" radius={[0, 6, 6, 0]}>
-                      {analyticsData.topKeywords.map((_, i) => (
+                      {topKeywords.map((_: any, i: number) => (
                         <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />
                       ))}
                     </Bar>
@@ -585,7 +579,7 @@ export default function AnalyticsPage() {
 
               {/* Keyword grid */}
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-                {analyticsData.topKeywords.map((kw, i) => (
+                {topKeywords.map((kw: any, i: number) => (
                   <div key={i} className="bg-gray-900/60 border border-gray-800 rounded-lg p-4 text-center hover:border-sky-500/30 transition-colors">
                     <p className="text-sm font-bold text-white">{kw.term}</p>
                     <p className="text-xs text-gray-400 mt-1">{kw.frequency.toLocaleString()} mentions</p>
@@ -613,16 +607,16 @@ export default function AnalyticsPage() {
 
               {/* Insight cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredInsights.map((insight, i) => (
+                {filteredInsights.map((insight: any, i: number) => (
                   <div 
                     key={i} 
                     className="bg-gray-900/60 border border-gray-800 rounded-lg p-5 hover:border-sky-500/30 transition-all cursor-pointer group"
                   >
                     <div className="flex items-start justify-between mb-3 gap-2">
-                      <Badge color={insight.category === 'idea' ? 'amber' : insight.category === 'needs' ? 'emerald' : 'sky'}>
-                        {insight.category === 'idea' && <Lightbulb className="w-3 h-3 mr-1" />}
-                        {insight.category === 'needs' && <Briefcase className="w-3 h-3 mr-1" />}
-                        {insight.category === 'project' && <Target className="w-3 h-3 mr-1" />}
+                      <Badge color={insight.category === "idea" ? "amber" : insight.category === "needs" ? "emerald" : "sky"}>
+                        {insight.category === "idea" && <Lightbulb className="w-3 h-3 mr-1" />}
+                        {insight.category === "needs" && <Briefcase className="w-3 h-3 mr-1" />}
+                        {insight.category === "project" && <Target className="w-3 h-3 mr-1" />}
                         {insight.category}
                       </Badge>
                       <span className="text-[10px] text-gray-500 shrink-0">{(insight.confidence * 100).toFixed(0)}% match</span>
@@ -651,9 +645,8 @@ export default function AnalyticsPage() {
               )}
             </div>
           ),
-
         }}
       />
     </div>
-  );
+  )
 }

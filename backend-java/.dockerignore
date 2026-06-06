@@ -2,9 +2,7 @@
 !pom.xml
 !mvnw
 !src/
-
-target/
-*.jar
+apache-maven-3.9.6/
 *.log
 .env
 .env.local
@@ -16,4 +14,5 @@ target/
 .gitattributes
 README.md
 MIGRATION_EXECUTIVE_SUMMARY.md
-apache-maven-3.9.6/
+target/
+!target/reddit-crawler-1.0.0-SNAPSHOT.jar

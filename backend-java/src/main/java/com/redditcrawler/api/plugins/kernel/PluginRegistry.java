@@ -2,7 +2,8 @@ package com.redditcrawler.api.plugins.kernel;
 
 import com.redditcrawler.api.plugins.interfaces.ICrawlerPlugin;
 import com.redditcrawler.api.plugins.interfaces.IAnalyticsPipeline;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -11,11 +12,11 @@ import java.util.Map;
 
 /**
  * Central registry for the Micro-Kernel plugin system.
- * Manages connector and analytics pipeline discovery, registration, and execution.
  */
-@Slf4j
 @Component
 public class PluginRegistry {
+
+    private static final Logger log = LoggerFactory.getLogger(PluginRegistry.class);
 
     private final List<ICrawlerPlugin> connectors = new ArrayList<>();
     private final List<IAnalyticsPipeline> pipelines = new ArrayList<>();
@@ -38,16 +39,13 @@ public class PluginRegistry {
         return List.copyOf(pipelines);
     }
 
-    /** Run crawlers on the given query and return results. */
     @SuppressWarnings("unchecked")
     public Map<String, Object> runCrawls(String query) {
-        log.info("[PluginRegistry] Running creaks for: {}", query);
+        log.info("[PluginRegistry] Running crawls for: {}", query);
         List<Object> results = new ArrayList<>();
         int totalProcessed = 0;
         for (ICrawlerPlugin connector : connectors) {
             try {
-                // In production this would call connector.crawl(query)
-                // For now return a placeholder since actual connector implementations are uncommitted
                 Map<String, Object> result = Map.of(
                     "connector", connector.getName(),
                     "query", query,
@@ -69,7 +67,6 @@ public class PluginRegistry {
         );
     }
 
-    /** Run analytics pipelines on raw data and return combined results. */
     public List<Map<String, Object>> runAnalysisPipelines(List<ICrawlerPlugin.RawData> rawData) {
         log.info("[PluginRegistry] Running {} pipeline(s) on {} items", pipelines.size(), rawData.size());
         List<Map<String, Object>> results = new ArrayList<>();

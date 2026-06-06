@@ -1,6 +1,7 @@
 package com.redditcrawler.api.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.redditcrawler.api.repository.CrawlerJobRepository;
 import com.redditcrawler.api.service.NicheScorer;
 import com.redditcrawler.api.service.RedditCrawlerService;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,7 +45,9 @@ class StatsControllerUnitTest {
         NicheScorer nicheScorer = org.mockito.Mockito.mock(NicheScorer.class);
 
         StatsController statsController = new StatsController(crawlerService, nicheScorer);
-        ExportController exportController = new ExportController(dataController);
+        CrawlerJobRepository jobRepoMock = org.mockito.Mockito.mock(CrawlerJobRepository.class);
+        when(jobRepoMock.findByStatus("COMPLETED")).thenReturn(List.of());
+        ExportController exportController = new ExportController(dataController, jobRepoMock);
 
         this.mockMvc = MockMvcBuilders.standaloneSetup(statsController, exportController)
                 .defaultResponseCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8)

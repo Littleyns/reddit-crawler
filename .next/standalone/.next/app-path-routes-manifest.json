@@ -1,0 +1,20 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/api/auth/login/route": "/api/auth/login",
+  "/api/crawler/start/route": "/api/crawler/start",
+  "/api/crawler/status/route": "/api/crawler/status",
+  "/api/crawler/stop/route": "/api/crawler/stop",
+  "/api/data/comments/route": "/api/data/comments",
+  "/api/data/export/route": "/api/data/export",
+  "/api/data/posts/route": "/api/data/posts",
+  "/api/settings/route": "/api/settings",
+  "/api/stats/route": "/api/stats",
+  "/controls/page": "/controls",
+  "/dashboard/page": "/dashboard",
+  "/data/page": "/data",
+  "/design-system/page": "/design-system",
+  "/favicon.ico/route": "/favicon.ico",
+  "/page": "/",
+  "/settings/page": "/settings"
+}

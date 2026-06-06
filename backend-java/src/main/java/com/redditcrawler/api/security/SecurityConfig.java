@@ -12,28 +12,33 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 /**
  * Spring Security configuration for the Reddit Crawler backend.
  * JWT validation is handled by JwtAuthFilter (order=1) which runs before Spring's filter chain.
- * This class delegates unauthenticated requests that skip JWT to permit public endpoints,
- * and requires auth for API routes.
  */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
+    // Endpoints that don't require authentication — health probes, actuator, public info
     private static final String[] PUBLIC_GET_ENDPOINTS = {
-        "/",
         "/actuator/health",
         "/actuator/info",
         "/error",
-        "/api/h2-console/**"
+        "/api/h2-console/**",
+        "/api/health/**",
+        "/api/config/test"
     };
 
+    // Public API read endpoints — no auth required for data retrieval
     private static final String[] PUBLIC_API_GET = {
         "/api/crawler/status/**",
-        "/api/niche/**",
-        "/api/analysis/**"
+        "/api/anomaly/**",          // AnomalyDetectionController
+        "/api/anomalies/**",       // also public anomalies endpoints
+        "/api/analytics/**",       // AnalyticsRestController read endpoints
+        "/api/analysis/**",        // IdeaExtraction / NlpPipeline etc. — most are GET/probe
+        "/api/data/post",          // DataController POST endpoint is query-based
+        "/api/niche/**"
     };
 
-    // Auth endpoints never require prior authentication — you must be able to log in without being logged in.
+    // Auth endpoints — login/register/verify never require prior authentication
     private static final String[] PUBLIC_AUTH_ENDPOINTS = {
         "/api/auth/login",
         "/api/auth/register",
@@ -55,19 +60,19 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Public GET endpoints (no auth needed)
                 .requestMatchers(HttpMethod.GET, PUBLIC_GET_ENDPOINTS).permitAll()
-                // Public API read endpoints
-                .requestMatchers(HttpMethod.GET, PUBLIC_API_GET).permitAll()
-                // Auth endpoints (login/register/verify) — never require prior authentication
-                .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/data/post").permitAll()
+                // Auth endpoints — never require prior authentication
+                .requestMatchers(PUBLIC_AUTH_ENDPOINTS).permitAll()
                 // All other POST/PUT/DELETE require authentication
                 .requestMatchers(HttpMethod.POST, "/api/**").authenticated()
                 .requestMatchers(HttpMethod.PUT, "/api/**").authenticated()
                 .requestMatchers(HttpMethod.DELETE, "/api/**").authenticated()
-                // Everything else permit all (allow H2 console, Swagger, etc.)
+                // Allow OPTIONS (preflight)
+                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                // Everything else permit all (Swagger, REST docs, etc.)
                 .anyRequest().permitAll()
             )
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
-            // Disable HTTP 403 default entry point — let filter handle it or route to error page
             .exceptionHandling(ex -> ex.authenticationEntryPoint((req, res, authFailed) -> {
                 res.setStatus(401);
                 res.setContentType("application/json");

@@ -51,7 +51,7 @@ services:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/reddit_crawler
       - SPRING_DATASOURCE_USERNAME=postgres
       - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - SPRING_JPA_HIBERNATE_DDL_AUTO=validate
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=${SPRING_JPA_HIBERNATE_DDL_AUTO:-update}
       - SPRING_SECURITY_ENABLED=true
       - SPRING_DOC_ENABLED=${SPRING_DOC_ENABLED:-true}
       - FLYWAY_VALIDATE_ON_MIGRATE=false
@@ -65,6 +65,12 @@ services:
       redis:
         condition: service_started
         required: true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
     restart: unless-stopped
     networks:
       - reddit-network

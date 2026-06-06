@@ -1,0 +1,13 @@
+{
+  "milestone": "Core Features",
+  "cycle_stage": 0,
+  "completed_steps": [],
+  "current_task": null,
+  "tick_count": 0,
+  "last_cron_run": null,
+  "workers_status": {
+    "pm-orchestrator": "ready",
+    "be-worker": "ready",
+    "fe-worker": "ready"
+  }
+}
