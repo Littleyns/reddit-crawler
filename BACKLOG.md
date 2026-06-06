@@ -9,7 +9,7 @@ Reddit Crawler — Autonomous Dev Factory Backlog
 ## Tasks
 
 ### P0 — Critical Bugs (fix first)
-- [ ] **#P0-1**: Backend container keeps crashing on startup despite BUILD SUCCESS
+- [x] [DONE] ] **#P0-1**: Backend container keeps crashing on startup despite BUILD SUCCESS
   - Symptoms: docker compose ps shows "Up but unhealthy" for reddit-api
   - Root cause likely: JPA/Hibernate initialization failure, bean injection error, or security filter chain deadlock
   
