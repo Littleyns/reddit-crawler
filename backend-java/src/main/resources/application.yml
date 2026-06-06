@@ -4,6 +4,9 @@ spring:
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
   
+  flyway:
+    enabled: false
+
   datasource:
     url: jdbc:postgresql://localhost:5432/reddit_crawler
     username: postgres
@@ -12,29 +15,24 @@ spring:
   
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: update
     show-sql: true
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
-    
-  flyway:
-    enabled: true
-    locations: classpath:db/migration
-    baseline-on-migrate: true
 
 server:
   port: 8080
 
-# --- JWT Config (dev defaults; override via env in prod) ---
+# --- JWT Config (dev defaults) ---
 app:
   jwt:
     secret: ${JWT_SECRET:change-this-to-a-256-bit-random-key-in-production}
-    expiration-ms: 86400000     # 24h access token  
-    refresh-expiration-ms: 604800000   # 7d refresh token
+    expiration-ms: 86400000
+    refresh-expiration-ms: 604800000
 
 logging:
   level:
-    com.arabtooling.redditcrawler: INFO
+    com.redditcrawler.api: INFO
     org.springframework.security: DEBUG

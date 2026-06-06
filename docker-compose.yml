@@ -60,6 +60,7 @@ services:
       - SPRING_JPA_HIBERNATE_DDL_AUTO=validate
       - SPRING_SECURITY_ENABLED=true
       - SPRING_DOC_ENABLED=${SPRING_DOC_ENABLED:-true}
+      - FLYWAY_VALIDATE_ON_MIGRATE=false
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,11 +79,18 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        API_PROXY_TARGET: http://api:8080/api
+        NEXT_PUBLIC_API_URL: /api
     container_name: reddit-frontend
     ports:
       - "3000:3000"
     environment:
+      - BACKEND_URL=http://api:8080
+      - BACKEND_API_URL=http://api:8080/api
       - NEXT_PUBLIC_API_URL=http://api:8080/api
+      - NEXT_PUBLIC_BACKEND_URL=http://api:8080
+      - API_PROXY_TARGET=http://api:8080/api
       - NODE_ENV=production
     depends_on:
       api:
@@ -114,6 +122,8 @@ services:
     profiles:
       - all
       - prod
+    networks:
+      - reddit-network
 
 
 volumes:

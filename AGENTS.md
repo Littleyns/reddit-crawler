@@ -1,4 +1,4 @@
-# Reddit Crawler - Agent Development Protocol
+# Reddit Crawler - Agent Development Protocol (v2 — OpenCode + Ollama Local)
 
 ## Project Identity
 - **GitHub User:** Littleyns (formerly ArabTooling)
@@ -10,12 +10,57 @@
 - Project Owner: Littleyouness (@Littleyounes) — Discord ID: `306798001886593026`
 - DevOps: Slim-Shady — Discord ID: `1488983572428751010`
 - Data Science: Zarrouk6969 — Discord ID: `1488985589574537347`
-- Development Lead: Hermes Agent (automated)
 
-## Current Status
-- **Phase:** Phase 2 - Core Features Integration
-- **Last Milestone:** Spring Boot migration merged (PR #12)
-- **Critical Gap:** Frontend API routes call mock data, not real backend
+## Model & Coding Agent Stack
+- **Model:** `qwen3.6:35b` (Qwen MoE 35B, GGUF Q4_K_M, 22GB)
+- **Provider:** Ollama local via HTTP API
+- **Endpoint:** `http://192.168.100.1:11434/v1`
+- **Coding Agent:** OpenCode CLI (`opencode run '...'`) — provider: openai, baseUrl: ollama endpoint
+- **Model in OpenCode:** `qwen3.6:35b` with OpenAI compatibility layer
+
+### OpenCode Configuration (ALL workers MUST use this)
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": "openai",
+  "openai": {
+    "baseUrl": "http://192.168.100.1:11434/v1"
+  }
+}
+```
+
+### OpenCode Usage for ALL Dev Workers
+- One-shot tasks: `opencode run 'prompt'` (no pty needed) — use `--model qwen3.6:35b` if not auto-detected
+- Context-aware: Always provide full file paths and code snippets
+- Parallel safe: Each worker uses its own workdir/worktree to avoid collisions
+- Verify output: Test compilation (`./mvnw clean package -DskipTests`) or frontend build (`npm run build`) BEFORE committing
+
+**CRITICAL RULES for OpenCode workers:**
+1. Never use external models (GPT, Claude, etc.) — always `qwen3.6:35b` via localhost Ollama
+2. No npm global packages that require OAuth login — all work done locally
+3. Output must be verifiable (test compile/test build runs) not just written code
+4. When writing code, include the full file content (not diffs) since OpenCode writes directly
+
+## Current Status & Active Bugs (MUST FIX FIRST)
+### 🔴 CRITICAL: Docker/Coolify Deployment Broken (since June 2026)
+- `docker-compose.yml` defines all services with `profiles: [all, backend]` but no containers running
+- Backend API (`reddit-api`) fails to deploy on Coolify — **unknown root cause since June**
+- Priority: diagnose and fix Docker build + deploy pipeline before any feature work
+
+### 🟡 Frontend Stagnation (2+ days without progress)
+- `analytics/page.tsx` references undefined hooks: `useHeatmap()`, `useKeywords()`
+- Missing: StatCard component, ChartSkeleton component
+- Analytics page fails to compile (`react-query` import but not needed + missing type imports: `useMemo`)
+
+### 🟢 Backend API (Partial)
+- Spring Boot 3.2 runs on port 8080 ✅ (when containers are up)
+- Hibernate fix applied: `LOWER()` JPQL queries → native SQL with ILIKE PostgreSQL syntax
+- Config test endpoint exists: `/api/config/test` (GET — returns credential validation status)
+
+### 📋 Feature Queue (after stack is stable)
+1. Round-robin multi-config support for Reddit API keys in task queue
+2. Complete integration: backend API endpoints → frontend Next.js data fetches
+3. Analytics pages fully functional with real data (no more mock/stub data)
 
 ## Architecture Summary
 ```
@@ -24,10 +69,12 @@
 │  Frontend   │◀────│ Backend      │     │          │
 │  port:3000  │     │ port:8080    │     │ port:5432│
 └─────────────┘     └──────────────┘     └──────────┘
+                        ↑
+                   OpenCode workers use this model for ALL code
 ```
 
 ## Branch Naming Convention
-- Feature branches: `<agent/<scope>/<feature-name>` or `feature/<name>`
+- Feature branches: `feature/<name>` or `<agent>/<scope>/<feature-name>`
 - Hotfixes: `hotfix/<issue-desc>`
 - Merge PRs to: `main` (not develop) from Phase 3 onward
 
@@ -38,22 +85,35 @@
 4. Run full test suite before commit: `mvn verify && npm test`
 5. Commit messages follow Conventional Commits: `type(scope): message`
 6. NEVER push directly to main — open PR, request review from @Littleyounes
-7. Type: `feat/fix/docs/test/chore/refactor/perf/security/ci/build`
 
 ## Deployment (Coolify)
 - **Instance:** http://162.19.205.8:8000 (self-hosted Coolify)
 - **CLI version:** 1.6.2+ located at `~/.local/bin/coolify`
-- **Context name:** `myvm` (stores server URL + API token)
 - **Deploy command:** `cd <repo-dir> && ~/.local/bin/coolify app deploy <app-name>`
-- Load `coolify-cli` skill for detailed commands before deploying/managing resources
 
-## Required Skills for Subagents
-All subagent workers MUST load these skills:
-1. Load `writing-plans` → write plans with bite-sized tasks (2-5 min each)
-2. Plan includes exact file paths, complete code examples, test commands with expected output
-3. Follow TDD cycle per task: write failing test → run (verify fail) → minimal impl → run (verify pass)
-4. Run full test suite after each commit to catch regressions
-5. Submit changes via PR, never direct push
+## Coding Agent Protocol (OpenCode Workers)
+### Worker Assignment Pattern
+Each worker handles a SINGLE domain per dev cycle:
+1. **Backend Worker** — Spring Boot Java backend, Dockerfile, API endpoints
+2. **Frontend Worker** — Next.js frontend pages, components, hooks
+3. **Integration Worker** — Connects frontend to real backend data (no mock)
+
+### OpenCode Commands
+```bash
+# Backend work (Java/Spring Boot):
+opencode run 'Refactor PostRepository to use native SQL' -f /home/kali/projects/reddit-crawler/draw the line in AGENTS.md and make it clear which agent handles what domain. Don't mix backend work with frontend work in the same worker session, ever." --model qwen3.6:35b
+
+# Frontend work (Next.js/React):
+opencode run 'Fix analytics/page.tsx missing hooks' -f /home/kali/projects/reddit-crawler/draw the line in AGENTS.md and make it clear which agent handles what domain. Don't mix backend work with frontend work in the same worker session, ever." --model qwen3.6:35b
+
+# Fix Docker/Coolify issues (infrastructure):
+opencode run 'Fix docker-compose.yml profiles and Spring config for Coolify deployment' -f /home/kali/projects/reddit-crawler/draw the line in AGENTS.md and make it clear which agent handles what domain. Don't mix backend work with frontend work in the same worker session, ever." --model qwen3.6:35b
+
+### Verification Protocol
+After writing code, workers MUST verify:
+- `./mvnw clean package -DskipTests` → BUILD SUCCESS (backend)
+- `npm run build` → 0 errors (frontend Next.js)  
+- No secrets/tokens in diffs (`git diff --name-only` checked against `.env*`)
 
 ## Code Review Rules
 - All review subagents must check: security (SQLi/XSS/CSRF), test coverage %, lint compliance, API contract matching
@@ -63,7 +123,33 @@ All subagent workers MUST load these skills:
 ## Quality Gates Before PR Merge
 - [ ] All tests pass (`mvn verify` and `npm test`)
 - [ ] 0 lint errors in backend and frontend
-- [ ] API contract matches PACT-CONTRACT.md requirements
 - [ ] Docker compose brings all services up without error
 - [ ] No secrets / credentials / tokens committed to repo (check diffs!)
 - [ ] PR description includes evidence (test output URLs, screenshots if UI change)
+
+## Profile Configurations for OpenCode Workers
+Each profile runs in isolated config directory:
+
+### Backend Worker Profile (`~/.hermes/profiles/backend-worker/`)
+```json
+{ "$schema": "https://opencode.ai/config.json", "provider": "openai" }
+```
+- Workdir: `/home/kali/projects/reddit-crawler/backend-java/`
+- Always checks `./mvnw clean package -DskipTests` before finish
+
+### Frontend Worker Profile (`~/.hermes/profiles/frontend-worker/`)
+```json
+{ "$schema": "https://opencode.ai/config.json", "provider": "openai" }
+```
+- Workdir: `/home/kali/projects/reddit-crawler/frontend/`
+- Always checks `npm run build` before finish
+
+## Spring Boot Hibernate Fix Applied (June 2026)
+- **Problem:** Hibernate 6.3 incompatible with JPQL `LOWER()` on TEXT columns in PostgreSQL
+- **Solution:** Use native queries with PostgreSQL `ILIKE` instead of `LOWER(p.body)` pattern matching
+- Files fixed: `PostRepository.java` — all `@Query(..., nativeQuery = true)` where LOWER was used
+
+## Database Strategy (Temporary)
+- Hibernate JPA ddl-auto set to `create-drop` in Spring config during dev
+- Data lost on restart but prevents migration conflicts during development phase
+- Production will use Flyway migrations when stable

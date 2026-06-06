@@ -62,9 +62,8 @@ public interface CrawlerJobRepository extends JpaRepository<CrawlerJob, String> 
     List<Object[]> successFailureCounts();
 
     /** Average job duration for completed jobs grouped by subreddit. */
-    @Query("SELECT j.subreddit, AVG(CAST(EXTRACT(EPOCH FROM (j.completedAt - j.startedAt)) AS double)) " +
-           "FROM CrawlerJob j WHERE j.status = 'COMPLETED' AND j.startedAt IS NOT NULL " +
-           "AND j.completedAt IS NOT NULL GROUP BY j.subreddit ORDER BY AVG DESC")
+    @Query(value = "SELECT subreddit, COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - started_at))), 0) FROM crawler_jobs WHERE status = 'COMPLETED' AND started_at IS NOT NULL AND completed_at IS NOT NULL GROUP BY subreddit ORDER BY subreddit", 
+           nativeQuery = true)
     List<Object[]> avgJobDurationBySubreddit();
 
     /** Jobs that ran within last N hours — used for freshness checks. */

@@ -43,10 +43,10 @@ public interface PostRepository extends JpaRepository<Post, Long> {
     // -----------------------------------------------------------------
 
     /** Paginated posts by subreddit with optional search filter. */
-    @Query("SELECT p FROM Post p WHERE (:subreddit IS NULL OR p.subreddit = :subreddit) " +
+    @Query(value = "SELECT p FROM Post p WHERE (:subreddit IS NULL OR p.subreddit = :subreddit) " +
            "AND (:search IS NULL OR (p.title ILIKE CONCAT('%', :search, '%')) " +
            "OR (p.body ILIKE CONCAT('%', :search, '%'))) " +
-           "ORDER BY p.upvotes DESC")
+           "ORDER BY p.upvotes DESC", nativeQuery = true)
     Page<Post> findBySubredditOrSearch(
             @Param("subreddit") String subreddit,
             @Param("search") String search,
