@@ -28,8 +28,9 @@ public class Post {
     private String title;
 
     @Lob
-    @Column(columnDefinition = "TEXT")
+    @Column(name = "content", columnDefinition = "TEXT")
     private String body;
+
 
     @Column(nullable = false, length = 256)
     private String author;
