@@ -315,6 +315,8 @@ public class RedditCrawlerService {
     }
 
     public static class PostDTO {
+        public PostDTO() {}
+
         @SuppressWarnings("unchecked")
         public static List<PostDTO> from(Map<String, Object> postJson) {
             if (postJson == null) return java.util.List.of();

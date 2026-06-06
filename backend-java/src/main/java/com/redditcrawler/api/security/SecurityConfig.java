@@ -29,7 +29,8 @@ public class SecurityConfig {
 
     private static final String[] PUBLIC_API_GET = {
         "/api/crawler/status/**",
-        "/api/score"
+        "/api/niche/**",
+        "/api/analysis/**"
     };
 
     // Auth endpoints never require prior authentication — you must be able to log in without being logged in.
