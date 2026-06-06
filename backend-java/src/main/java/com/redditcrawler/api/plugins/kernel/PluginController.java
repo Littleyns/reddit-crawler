@@ -14,10 +14,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
-/**
- * REST API controller to expose and manage the Micro-Kernel plugin system.
- * Provides endpoints for: listing connectors, running crawls, triggering analytics pipelines.
- */
+/** REST API controller to expose and manage the Micro-Kernel plugin system. */
 @RestController
 @RequestMapping("/api/plugins")
 public class PluginController {
@@ -26,7 +23,6 @@ public class PluginController {
 
     @Autowired private PluginRegistry registry;
 
-    /** List all available connectors. */
     @GetMapping("/connectors")
     public ResponseEntity<List<Map<String, Object>>> listConnectors() {
         log.info("[PluginAPI] Listing connectors");
@@ -35,27 +31,21 @@ public class PluginController {
             .toList());
     }
 
-    /** List all analytics pipelines. */
     @GetMapping("/pipelines")
     public ResponseEntity<List<Map<String, Object>>> listPipelines() {
         log.info("[PluginAPI] Listing analytics pipelines");
-        // Registry exposes pipelines differently; return empty or add method there
         return ResponseEntity.ok(List.of());
     }
 
-    /** Trigger a crawl via all registered connectors. */
     @PostMapping("/crawl")
-    public ResponseEntity<Map<String, Object>> runCrawl(
-            @RequestParam(defaultValue = "") String subredditQuery) {
+    public ResponseEntity<Map<String, Object>> runCrawl(@RequestParam(defaultValue = "") String subredditQuery) {
         log.info("[PluginAPI] Crawling requested for: {}", subredditQuery);
         var results = registry.runCrawls(subredditQuery.isEmpty() ? "all" : subredditQuery);
         return ResponseEntity.ok(Map.of("status", "completed", "results", results));
     }
 
-    /** Trigger analytics on recent crawl data. */
     @PostMapping("/analyze")
-    public ResponseEntity<List<Map<String, Object>>> runAnalysis(
-            @RequestBody(required = false) Map<?, ?> payload) {
+    public ResponseEntity<List<Map<String, Object>>> runAnalysis(@RequestBody(required = false) Map<?, ?> payload) {
         log.info("[PluginAPI] Analytics requested");
         List<ICrawlerPlugin.RawData> rawData = new ArrayList<>();
         if (payload != null && payload.containsKey("data")) {
@@ -70,40 +60,25 @@ public class PluginController {
         return ResponseEntity.ok(registry.runAnalysisPipelines(rawData));
     }
 
-    /** Full system status (connectors + pipelines). */
     @GetMapping("/status")
     public ResponseEntity<Map<String, Object>> systemStatus() {
         log.info("[PluginAPI] System status requested");
         var connectors = registry.getAvailableConnectors();
-        return ResponseEntity.ok(Map.of(
-            "kernel", "active",
-            "connectors", connectors.size(),
-            "pipelines", 0 // TODO: add pipeline discovery method to PluginRegistry
-        ));
+        return ResponseEntity.ok(Map.of("kernel", "active", "connectors", connectors.size(), "pipelines", 0));
     }
 
-    /** Safely extract a RawData object from a payload item (Map-like or POJO). */
     private static ICrawlerPlugin.RawData extractRawData(Object item) {
-        if (item == null || !(item instanceof java.util.Map<?, ?> map)) {
-            return null;
-        }
+        if (item == null || !(item instanceof java.util.Map<?, ?> map)) return null;
         @SuppressWarnings("unchecked")
         java.util.Map<String, Object> m = (java.util.Map<String, Object>) (Object)map;
         String id = String.valueOf(m.getOrDefault("id", ""));
         String title = String.valueOf(m.getOrDefault("title", ""));
         Object ce = m.get("contentBody");
         String content = ce != null ? String.valueOf(ce) : "";
-        if (content.isEmpty()) {
-            Object cc = m.get("content");
-            if (cc != null) content = String.valueOf(cc);
-        }
+        if (content.isEmpty()) { Object cc = m.get("content"); if (cc != null) content = String.valueOf(cc); }
         Object ss = m.get("source");
         String source = ss != null ? String.valueOf(ss) : "unknown";
-        try {
-            return new ICrawlerPlugin.RawData(id, title, content, source);
-        } catch (Exception e) {
-            log.error("[PluginAPI] Failed to construct RawData: {}", e.getMessage());
-            return null;
-        }
+        try { return new ICrawlerPlugin.RawData(id, title, content, source); }
+        catch (Exception e) { log.error("[PluginAPI] Failed to construct RawData: {}", e.getMessage()); return null; }
     }
-} 
+}
