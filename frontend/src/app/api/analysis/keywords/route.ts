@@ -1,51 +1,27 @@
-/** @file Keyword extraction endpoint using TF-IDF and KeyBERT Week W23 */
+import { NextRequest, NextResponse } from "next/server";
 
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
+const BACKEND_URL = process.env.BACKEND_API_URL || "http://localhost:8080/api";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8080'
-
-export async function GET(request: NextRequest) {
-    const { searchParams } = request.nextUrl
-    
-    const text = searchParams.get('text')
-    const method = searchParams.get('method') ?? 'tfidf'
-    const topN = Number(searchParams.get('topk')) ?? 20
-    
-    if (!text) {
-        return NextResponse.json(
-            { error: 'text query parameter is required' },
-            { status: 400 }
-        )
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  try {
+    const response = await fetch(
+      BACKEND_URL + "/analysis/keywords" + url.search,
+      { method: "GET", headers: { Accept: "application/json" } },
+    );
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: "Backend returned " + response.status },
+        { status: response.status },
+      );
     }
-    
-    try {
-        const url = `${BASE_URL}/api/keywords/extract?method=${method}&topk=${topN}`
-        
-        const resp = await fetch(url, {
-            headers: { 'Content-Type': 'application/json' },
-        })
-        
-        if (!resp.ok) {
-            return NextResponse.json(
-                { error: `Backend returned ${resp.status}` },
-                { status: resp.status }
-            )
-        }
-        
-        const result = await resp.json()
-        
-        const keywords = (result.keywords || []).slice(0, topN).map((kw: string, i: number) => ({
-            keyword: kw,
-            tfidf: result.tfidf?.[i] ?? 0,
-        }))
-        
-        return NextResponse.json({ keywords, method, count: keywords.length })
-    } catch (err) {
-        console.error('[keywords] route error:', err)
-        return NextResponse.json(
-            { error: 'Unable to reach keyword service' },
-            { status: 502 }
-        )
-    }
+    const data = await response.json();
+    return NextResponse.json(data, { headers: { "Content-Type": "application/json" } });
+  } catch (err) {
+    console.warn("[Analytics Proxy] Backend unreachable:", err);
+    return NextResponse.json(
+      { error: "Backend unavailable", seedData: true },
+      { status: 502 },
+    );
+  }
 }
