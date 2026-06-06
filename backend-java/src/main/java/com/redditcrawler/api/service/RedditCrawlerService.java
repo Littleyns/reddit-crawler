@@ -19,16 +19,17 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.Comparator;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.redditcrawler.api.repository.CommentRepository;
+import com.redditcrawler.api.repository.CrawlerJobRepository;
+import com.redditcrawler.api.model.CrawlerJob;
 import com.redditcrawler.api.repository.PostRepository;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.redditcrawler.api.repository.CommentRepository;
-import com.redditcrawler.api.repository.PostRepository;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Service that crawls Reddit via the public Reddit API (oauth + JSON endpoint).
@@ -44,6 +45,8 @@ public class RedditCrawlerService {
     private final RedisCache redisCache;
     private final PostRepository postRepo;
     private final CommentRepository commentRepo;
+
+    private final CrawlerJobRepository jobRepo;
 
     private final AtomicBoolean redisAvailable = new AtomicBoolean(false);
 
@@ -61,12 +64,14 @@ public class RedditCrawlerService {
             CrawlJobStore jobStore,
             RedisCache redisCache,
             PostRepository postRepo,
-            CommentRepository commentRepo) {
+            CommentRepository commentRepo,
+            CrawlerJobRepository jobRepo) {
         this.restTemplate = restTemplate;
         this.jobStore = jobStore;
         this.redisCache = redisCache;
         this.postRepo = postRepo;
         this.commentRepo = commentRepo;
+        this.jobRepo = jobRepo;
     }
 
     @PostConstruct
@@ -109,6 +114,14 @@ public class RedditCrawlerService {
 
         jobStore.put(jobId, job);
         doCrawlSync(jobId, subreddit, config);
+        // Also persist to PostgreSQL for durable storage and analytics queries
+        CrawlerJob entity = new CrawlerJob();
+        entity.setJobId(jobId);
+        entity.setSubreddit(subreddit);
+        entity.setStatus("RUNNING");
+        entity.setStartedAt(Instant.now());
+        entity.setConfig("{}");
+        jobRepo.save(entity);
         return jobId;
     }
 
@@ -189,6 +202,7 @@ public class RedditCrawlerService {
                     jobStore.updateResults(jobId, crawledPosts);
                     jobStore.updateComments(jobId, allComments);
                     jobStore.updateStatus(jobId, "COMPLETED");
+                    persistJobStatusToJpa(jobId, "COMPLETED", crawledPosts);
                 persistPostsToPostgres(jobId, crawledPosts);
                 persistCommentsToPostgres(jobId, allComments);
                 }
@@ -208,6 +222,7 @@ public class RedditCrawlerService {
             } else {
                 jobStore.updateStatus(jobId, error);
             }
+            persistJobStatusToJpa(jobId, error, null);
         }
     }
 
@@ -276,6 +291,7 @@ public class RedditCrawlerService {
         } else if (jobStore.containsKey(jobId)) {
             jobStore.updateStatus(jobId, "CANCELLED");
         }
+        persistJobStatusToJpa(jobId, "CANCELLED", null);
     }
 
     private String cleanBody(String text) {
@@ -328,6 +344,62 @@ public class RedditCrawlerService {
         return flat;
     }
 
+    /** Persist/update crawl job status to JPA for analytics queries. */
+    @SuppressWarnings("unchecked")
+    private void persistJobStatusToJpa(String jobId, String status, List<Map<String, Object>> results) {
+        try {
+            Optional<CrawlerJob> found = jobRepo.findById(jobId);
+            CrawlerJob entity;
+            if (found.isPresent()) {
+                entity = found.get();
+            } else {
+                entity = new CrawlerJob();
+                entity.setJobId(jobId);
+                entity.setSubreddit("unknown");
+                entity.setStartedAt(Instant.now());
+            }
+            entity.setStatus(status);
+            if ("COMPLETED".equals(status) && entity.getCompletedAt() == null) {
+                entity.setCompletedAt(Instant.now());
+            } else if ("FAILED_NO_DATA".equals(status) || status.startsWith("FAILED:") || "CANCELLED".equals(status)) {
+                entity.setCompletedAt(entity.getCompletedAt() != null ? entity.getCompletedAt() : Instant.now());
+            }
+            if ("RUNNING".equals(status) && entity.getResultsJson() == null) {
+                entity.setResultsJson("");
+            }
+            jobRepo.save(entity);
+            log.info("[P1-1] Persisted job {} status={} to postgres crawler_jobs", jobId, status);
+        } catch (Exception e) {
+            log.error("[P1-1] Failed persisting job status for {}", jobId, e);
+        }
+    }
+
+
+    /** Get all crawl jobs from JPA (PostgreSQL) for the /api/crawler/jobs endpoint. */
+    public List<Map<String, Object>> getAllJobsFromJpa() {
+        return jobRepo.findAll(org.springframework.data.domain.Sort.by(
+                org.springframework.data.domain.Sort.Order.desc("startedAt")
+            ))
+            .stream()
+            .map(e -> {
+                Map<String, Object> m = new java.util.LinkedHashMap<>();
+                m.put("jobId", e.getJobId());
+                m.put("subreddit", e.getSubreddit());
+                m.put("status", e.getStatus());
+                m.put("startedAt", e.getStartedAt());
+                m.put("completedAt", e.getCompletedAt());
+                m.put("resultsJson", e.getResultsJson() != null && !e.getResultsJson().isEmpty() ? java.util.List.of(true) : java.util.List.<Object>of());
+                m.put("config", getConfigField(e));
+                return m;
+            })
+            .collect(java.util.stream.Collectors.toList());
+    }
+
+    /** Access the config field via reflection (JPA lazy-load safe). */
+    private String getConfigField(CrawlerJob job) {
+        Object val = job.getConfig();
+        return val != null ? String.valueOf(val) : "{}";
+    }
     public static class PostDTO {
         public PostDTO() {}
 

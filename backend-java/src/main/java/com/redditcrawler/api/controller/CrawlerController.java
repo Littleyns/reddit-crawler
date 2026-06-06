@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -147,6 +148,37 @@ public class CrawlerController {
         return ResponseEntity.ok(Map.of(
                 "stoppedCount", stopped,
                 "message", stopped > 0 ? (stopped + " crawler(s) stopped") : "No active crawlers to stop"
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // GET /api/crawler/jobs — JPA-backed job listing for analytics queries
+    // ------------------------------------------------------------------
+    @GetMapping("/jobs")
+    public ResponseEntity<Map<String, Object>> getAllJobsJpa() {
+        List<Map<String, Object>> jpaJobs = crawlerService.getAllJobsFromJpa();
+        List<Map<String, Object>> allStoreJobs = crawlerService.getAllJobs();
+
+        // Merge: prefer Redis/in-memory live data where available; fill gaps with JPA
+        Map<String, Map<String, Object>> merged = new LinkedHashMap<>();
+        for (Map<String, Object> job : allStoreJobs) {
+            String id = String.valueOf(job.get("jobId"));
+            merged.put(id, new LinkedHashMap<>(job));
+        }
+
+        // Add any JPA jobs not yet in the store
+        for (Map<String, Object> job : jpaJobs) {
+            String id = String.valueOf(job.get("jobId"));
+            if (!merged.containsKey(id)) {
+                merged.put(id, job);
+            }
+        }
+
+        return ResponseEntity.ok(Map.of(
+            "jobs", new ArrayList<>(merged.values()),
+            "total", merged.size(),
+            "source", crawlerService.isDistributedMode() ? "redis" : "in-memory",
+            "jpaAvailable", !jpaJobs.isEmpty()
         ));
     }
 
