@@ -69,8 +69,9 @@ public class SecurityConfig {
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
             // Disable HTTP 403 default entry point — let filter handle it or route to error page
             .exceptionHandling(ex -> ex.authenticationEntryPoint((req, res, authFailed) -> {
-                res.setStatus(200);
+                res.setStatus(401);
                 res.setContentType("application/json");
+                res.setCharacterEncoding("UTF-8");
                 res.getWriter().write("{\"error\":\"Unauthorized\",\"message\":\"JWT token required\"}");
             }))
         ;

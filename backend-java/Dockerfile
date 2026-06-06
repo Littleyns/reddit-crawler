@@ -1,37 +1,28 @@
-# Multi-stage build for Reddit Crawler API
-FROM eclipse-temurin:21-jdk-alpine AS builder
+# ==============================================================================
+# Backend Dockerfile — copy pre-compiled JAR, no build tools container needed
+# Compile locally (Jenkins/GitHub Actions/dev machine) → docker cp or COPY the JAR.
+# This approach sidesteps slow Maven image pulls / mvnw + curl on Alpine.
+# ==============================================================================
 
-WORKDIR /build
-
-# Copy Maven project files
-COPY pom.xml ./
-COPY src ./src
-COPY mvnw ./
-
-# Run Maven build after normalizing line endings from Windows checkouts.
-RUN apk add --no-cache curl && \
-    sed -i 's/\r$//' ./mvnw && \
-    chmod +x ./mvnw && \
-    ./mvnw clean package -DskipTests
-
-# Runtime stage
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:21-jre-alpine AS production
 
 WORKDIR /app
 
-# Create non-root user
+# Add healthcheck tools so we can probe the Spring Boot /actuator endpoint
+RUN apk add --no-cache curl tini
+
+# Non-root user for security
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
-# Copy built JAR from builder
-COPY --from=builder /build/target/reddit-crawler-1.0.0-SNAPSHOT.jar app.jar
+# Copy pre-built Spring Boot JAR produced by ./mvnw package
+COPY target/reddit-crawler-1.0.0-SNAPSHOT.jar app.jar
 
-# Copy migrations
-COPY src/main/resources/db ./db
-
-# Expose port
 EXPOSE 8080
 
-# Run as non-root user
-USER appuser
+# Healthcheck — waits for Spring to start (up to 90s via --start-period)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+  CMD curl -f http://localhost:8080/api/config/test || exit 1
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+USER appuser
+ENTRYPOINT ["tini", "--"]
+CMD ["java", "-Djava.security.egd=file:/dev/./urandom", "-jar", "app.jar"]
