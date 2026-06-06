@@ -83,7 +83,7 @@ function SentimentChart() {
           <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
           <XAxis dataKey="subreddit" tick={{ fontSize: 10, fill: "var(--color-fg-muted)" }} axisLine={{ stroke: "var(--color-border)" }} tickLine={false} />
           <YAxis tick={{ fontSize: 10, fill: "var(--color-fg-muted)" }} axisLine={false} tickLine={false} domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} />
-          <RechartsTooltip content={customTooltip} />
+          <Tooltip content={customTooltip} />
           <Legend wrapperStyle={{ fontSize: 11 }} formatter={() => null} />
           <Bar dataKey="positive" stackId="sentiment" fill="#22c55e" name="Positive" />
           <Bar dataKey="neutral" stackId="sentiment" fill="#a1a1aa" name="Neutral" />
@@ -137,7 +137,7 @@ function KeywordWordCloud() {
               ))}
               <LabelList position="outside" fill="var(--color-fg-secondary)" fontSize={10} stroke="none" dataKey="name" />
             </Pie>
-            <RechartsTooltip
+            <Tooltip
               contentStyle={{ backgroundColor: "var(--color-surface-high)", border: "1px solid var(--color-border)", borderRadius: 0, color: "var(--color-fg-primary)", fontSize: 12 }}
               formatter={(_value: unknown) => [String(_value), "frequency"]}
             />
