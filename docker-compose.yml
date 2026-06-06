@@ -55,6 +55,9 @@ services:
       - SPRING_SECURITY_ENABLED=true
       - SPRING_DOC_ENABLED=${SPRING_DOC_ENABLED:-true}
       - FLYWAY_VALIDATE_ON_MIGRATE=false
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID:-dev-client-id}
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET:-dev-client-secret}
+      - JWT_SECRET=${JWT_SECRET:-change-to-a-256-bit-random-key-in-production}
     depends_on:
       postgres:
         condition: service_healthy
