@@ -2,18 +2,47 @@
 
 // src/app/analytics/page.tsx — Real-time analytics dashboard with recharts
 
-import { useState, useEffect } from "react"
+import React, { useState, useEffect, useMemo } from "react"
+import { useHeatmap, useKeywords } from "@/hooks/use-analytics"
 import { 
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList 
 } from "recharts"
 import type { SubredditStats, ThreadInsight, AnalyticsData } from "@/lib/mock-analytics"
 import { generateMockAnalyticsData } from "@/lib/mock-analytics"
 import { 
   BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, 
   Search, RefreshCw, Download, Filter, Users, Globe, TrendingUp, MessageSquare,
-  Target, Lightbulb, Briefcase
+  Target, Lightbulb, Briefcase, Database, Star
 } from "lucide-react"
+// ============================================================================
+// Inline UI Components (no separate file needed)
+// ============================================================================
+
+// Simple inline section header — avoids icon ForwardRef typing issues
+function SectionHeader(props: { title: string; icon?: any }) {
+  return (
+    <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+      {props.icon && (<span className="h-4 w-4">{typeof props.icon}</span>)}
+      <span className="font-medium">{props.title}</span>
+    </div>
+  );
+}
+
+// Color palette generator for pie charts (HSL-based, evenly distributed hues)
+function huePalette(idx: number, total: number): string {
+  const angle = Math.round((idx / Math.max(total - 1, 1)) * 360);
+  return `hsl(${angle}, 70%, 55%)`;
+}
+
+function ChartSkeleton() {
+  return (
+    <div className="panel-inset flex h-32 items-center justify-center rounded-md border border-dashed border-gray-300 dark:border-gray-700 text-sm text-gray-500">
+      Loading chart...
+    </div>
+  );
+}
+
 
 // Colors for charts
 const COLORS = ['#0ea5e9', '#8b5cf6', '#f43f5e', '#10b981', '#f59e0b', '#ec4899', '#6366f1'] as const
@@ -184,6 +213,29 @@ function Badge({ children, color }: { children: React.ReactNode; color: 'emerald
       {children}
     </span>
   )
+}
+
+// ===== Stat Card Component (inline UI element for stats grid) =====
+function StatCard({ icon, label, value, change, trend }: {
+  icon?: any;
+  label: string;
+  value: string | number;
+  change: string;
+  trend: 'up' | 'down' | 'neutral';
+}) {
+  const colors = { up: 'text-emerald-400', down: 'text-rose-400', neutral: 'text-blue-400' } as const;
+  return (
+    <div className={`panel-inset rounded-md p-3 flex flex-col gap-1 ${trend === 'neutral' ? '' : ''}`}>
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{label}</span>
+        <div className="h-7 w-7 flex items-center justify-center rounded border border-gray-700/50 bg-white/5">
+          {icon}
+        </div>
+      </div>
+      <p className="text-lg font-medium text-gray-900 dark:text-white">{value}</p>
+      <span className={`text-[10px] ${colors[trend]} tracking-wide`}>{change}</span>
+    </div>
+  );
 }
 
 function TabsNav({ defaultValue, tabs, contentPanels }: { 
