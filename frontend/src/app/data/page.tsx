@@ -1,135 +1,207 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { cn } from "@/lib/utils";
-import Link from "next/link";
-import { Download, Search } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import axios from "axios";
 import { DataTable } from "@/components/data-table";
-import { useComments, usePosts } from "@/hooks/use-reddit-crawler";
-import { buildExportUrl, formatDate } from "@/lib/utils";
-import type { CommentRecord, PostRecord } from "@/lib/types";
+import { StatCard } from "@/components/stat-card";
+import { ChartSkeleton } from "@/components/ui/chart-skeleton";
 
-const postColumns = [
-  {
-    key: "title" as const,
-    label: "Post",
-    render: (row: PostRecord) => (
-      <div className="min-w-[12rem]">
-        <p className="text-[11px] font-medium leading-tight truncate text-[var(--color-fg-primary)]">{row.title}</p>
-        <p className="mt-0.5 text-[9px] text-[var(--color-fg-muted)] tabular-nums whitespace-nowrap">{row.subreddit} • {row.author}</p>
-      </div>
-    ),
-  },
-  { key: "score" as const, label: "Score", render: (r: PostRecord) => <span className="tabular-nums text-[11px] text-[var(--color-fg-primary)]">{r.score.toLocaleString()}</span> },
-  { key: "commentsCount" as const, label: "Comments", render: (r: PostRecord) => <span className="tabular-nums text-[11px] text-[var(--color-fg-primary)]">{r.commentsCount}</span> },
-  { key: "createdAt" as const, label: "Created", render: (row: PostRecord) => <span className="text-[var(--color-fg-muted)] tabular-nums text-[9px] whitespace-nowrap">{formatDate(row.createdAt)}</span> },
-  { key: "url" as const, label: "Link", render: (row: PostRecord) => (
-    <Link href={row.url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-[var(--color-accent-text)] hover:text-[var(--color-fg-secondary)] transition-colors">Reddit →</Link>
-  )},
-] as const;
+const BACKEND = process.env.NEXT_PUBLIC_API_URL || "/api";
 
-const commentColumns = [
-  {
-    key: "body" as const,
-    label: "Comment",
-    render: (row: CommentRecord) => (
-      <div className="min-w-[16rem] max-w-xl truncate">
-        <p className="text-[10px] leading-tight text-[var(--color-fg-primary)] line-clamp-1">{row.body}</p>
-        <p className="mt-0.5 text-[9px] text-[var(--color-fg-muted)] tabular-nums whitespace-nowrap">{row.subreddit} • {row.author}</p>
-      </div>
-    ),
-  },
-  {key: "score" as const, label: "Score", render: (r: CommentRecord) => <span className="tabular-nums text-[11px] text-[var(--color-fg-primary)]">{r.score.toLocaleString()}</span>},
-  { key: "createdAt" as const, label: "Created", render: (row: CommentRecord) => <span className="text-[var(--color-fg-muted)] tabular-nums text-[9px] whitespace-nowrap">{formatDate(row.createdAt)}</span> },
-] as const;
+interface PostRow {
+  id: number;
+  title: string;
+  subreddit: string;
+  author: string;
+  upvotes: number;
+  commentsCount: number;
+  createdUtc: string;
+}
+
+interface CommentRow {
+  id: number;
+  postTitle: string;
+  author: string;
+  bodyPreview: string;
+  upvotes: number;
+  createdAt: string;
+}
+
+function formatTime(ts: string) {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
 
 export default function DataPage() {
-  const [activeTab, setActiveTab] = useState<"posts" | "comments">("posts");
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState("");
+  const [view, setView] = useState<"posts" | "comments">("posts");
+  const [subredditFilter, setSubredditFilter] = useState("");
+  const [page, setPage] = useState(0);
+  const pageSize = 20;
 
-  const query = useMemo(() => ({ page, pageSize: 50, search }), [page, search]);
-  const postsQuery = usePosts(query);
-  const commentsQuery = useComments(query);
+  // Fetch posts from real PostgreSQL via API
+  const { data: postsData, isLoading: postsLoading } = useQuery({
+    queryKey: ["data-posts", subredditFilter, page],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (subredditFilter) params.set("subreddit", subredditFilter);
+      params.set("page", String(page));
+      params.set("size", String(pageSize));
+      const res = await axios.get(`${BACKEND}/data/posts?${params}`);
+      return res.data;
+    },
+  });
 
-  const activeResponse = activeTab === "posts" ? postsQuery.data : commentsQuery.data;
-  const totalRecords = activeResponse?.total ?? 0;
-  const totalPages = activeResponse?.totalPages ?? 1;
+  // Fetch comments from real PostgreSQL via API
+  const { data: commentsData, isLoading: commentsLoading } = useQuery({
+    queryKey: ["data-comments", subredditFilter, page],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (subredditFilter) params.set("subreddit", subredditFilter);
+      params.set("page", String(page));
+      params.set("size", String(pageSize));
+      const res = await axios.get(`${BACKEND}/data/comments?${params}`);
+      return res.data;
+    },
+  });
+
+  // Fetch available subreddits
+  const { data: subredditsData } = useQuery({
+    queryKey: ["data-subreddits"],
+    queryFn: async () => {
+      const res = await axios.get(`${BACKEND}/data/subreddits`);
+      return res.data;
+    },
+  });
+
+  const totalPosts = postsData?.totalElements ?? 0;
+  const totalPages = postsData?.totalPages ?? 0;
+  const totalComments = commentsData?.totalElements ?? 0;
+
+const columns = view === "posts"
+    ? [
+        { key: "id" as const, label: "ID" },
+        { key: "title" as const, label: "Title" },
+        { key: "subreddit" as const, label: "Subreddit" },
+        { key: "author" as const, label: "Author" },
+        { key: "upvotes" as const, label: "Upvotes" },
+        { key: "commentsCount" as const, label: "Comments" },
+        { key: "createdUtc" as const, label: "Date", render: (row: Record<string, any>) => formatTime(String(row.createdUtc || "")) },
+      ]
+    : [
+        { key: "id" as const, label: "ID" },
+        { key: "postTitle" as const, label: "Post" },
+        { key: "author" as const, label: "Author" },
+        { key: "bodyPreview" as const, label: "Body Preview" },
+        { key: "upvotes" as const, label: "Upvotes" },
+        { key: "createdAt" as const, label: "Date", render: (row: Record<string, any>) => formatTime(String(row.createdAt || "")) },
+      ];
+
+
+
+  const rows = view === "posts" ? (postsData?.content ?? []) : (commentsData?.content ?? []);
 
   return (
-    <div className="flex w-full flex-col gap-3 min-w-0">
-      {/* Top bar — full-width */}
-      <section className="panel-sq-dense flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <span className="section-label block mb-0.5">Data Explorer</span>
-          <h2 className="text-sm font-semibold tracking-tight mt-0.5 truncate text-[var(--color-fg-primary)]">
-            Search {activeTab} and export crawl data.
-          </h2>
-        </div>
-
-        <div className="flex gap-1.5 flex-wrap items-stretch shrink-0">
-          {/* Search */}
-          <div className="flex items-center border border-[var(--color-border)] bg-[var(--color-surface-high)] px-3 min-w-[240px] lg:w-[280px]">
-            <Search className="h-3.5 w-3.5 text-[var(--color-fg-muted)] mr-2 shrink-0" />
-            <input
-              value={search}
-              onChange={(e) => { setPage(1); setSearch(e.target.value); }}
-              className="bg-transparent text-[11px] outline-none flex-1 min-w-0 placeholder:text-[var(--color-fg-muted)] text-[var(--color-fg-primary)]"
-              placeholder="Search titles, authors..."
-            />
-          </div>
-
-          {/* Tabs */}
-          <div className="flex border border-[var(--color-border)] bg-[var(--color-surface-high)]">
-            {(["posts", "comments"] as const).map((tab) => (
-              <button key={tab} type="button" onClick={() => { setActiveTab(tab); setPage(1); }}
-                className={cn(
-                  "px-2.5 py-[4px] text-[9px] font-semibold uppercase tracking-wider transition-colors border-l border-[var(--color-border)] first:border-l-0",
-                  activeTab === tab ? "bg-[var(--color-accent)]/10 text-[var(--color-accent-text)]" : "text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)]"
-                )}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-
-          {/* Export */}
-          <Link href={buildExportUrl("csv", activeTab, query)} target="_blank">
-            <span className="btn-sq btn-sq-primary px-2.5 py-[4px] flex items-center gap-1.5 text-[9px] shrink-0 cursor-pointer rounded-none">
-              <Download className="h-3 w-3" /> CSV
-            </span>
-          </Link>
-          <Link href={buildExportUrl("json", activeTab, query)} target="_blank">
-            <span className="btn-sq btn-sq-muted px-2.5 py-[4px] flex items-center gap-1.5 text-[9px] shrink-0 hover:border-[var(--color-border-muted)] cursor-pointer rounded-none">
-              <Download className="h-3 w-3" /> JSON
-            </span>
-          </Link>
-        </div>
-      </section>
-
-      {/* Summary bar */}
-      <div className="flex items-center gap-2 px-1 text-[9px] font-mono text-[var(--color-fg-muted)] tabular-nums">
-        <span>{totalRecords.toLocaleString()} records</span>
-        <span className="text-[var(--color-border)]">/</span>
-        <span>page {activeResponse?.page ?? 1} of {totalPages}</span>
+    <div className="flex flex-col gap-4">
+      {/* Stats Summary */}
+      <div className="dense-grid sm:grid-cols-3">
+        {postsLoading || commentsLoading
+          ? [...Array(3)].map((_, i) => <ChartSkeleton key={i} className="h-[72px]" />)
+          : [
+              <StatCard
+                key="posts"
+                label="Total Posts"
+                value={totalPosts.toLocaleString()}
+                trend="+ crawled"
+                icon="database"
+              />,
+              <StatCard
+                key="comments"
+                label="Total Comments"
+                value={totalComments.toLocaleString()}
+                trend="+ crawled"
+                icon="message"
+              />,
+              <StatCard
+                key="subreddits"
+                label="Subreddits"
+                value={String(subredditsData?.length ?? 0)}
+                icon="hash"
+              />,
+            ]}
       </div>
 
-      {/* Table — full width */}
-      <div className="flex w-full min-w-0 flex-1">
-        {activeTab === "posts" ? (
-          <DataTable<PostRecord> columns={postColumns as any} rows={postsQuery.data?.items ?? []} page={activeResponse?.page ?? 1} totalPages={totalPages} onPageChange={setPage} />
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          onClick={() => setView("posts")}
+          className={`px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
+            view === "posts"
+              ? "bg-accent-primary text-white border-transparent"
+              : "border-border hover:bg-surface-high"
+          }`}
+        >
+          Posts ({totalPosts})
+        </button>
+        <button
+          onClick={() => setView("comments")}
+          className={`px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
+            view === "comments"
+              ? "bg-accent-primary text-white border-transparent"
+              : "border-border hover:bg-surface-high"
+          }`}
+        >
+          Comments ({totalComments})
+        </button>
+
+        <input
+          type="text"
+          placeholder="Filter by subreddit..."
+          value={subredditFilter}
+          onChange={(e) => { setSubredditFilter(e.target.value); setPage(0); }}
+          className="px-3 py-2 text-sm border border-border rounded-lg bg-surface-mid w-56"
+        />
+      </div>
+
+      {/* Data Table */}
+      <div className="overflow-x-auto rounded-lg border border-border">
+        {rows.length === 0 && !postsLoading && !commentsLoading ? (
+          <div className="p-8 text-center text-fg-muted">
+            No data yet. Start a crawler job from /controls to populate this table.
+          </div>
         ) : (
-          <DataTable<CommentRecord> columns={commentColumns as any} rows={commentsQuery.data?.items ?? []} page={activeResponse?.page ?? 1} totalPages={totalPages} onPageChange={setPage} />
+          <DataTable 
+  columns={columns} 
+  rows={rows} 
+  page={page + 1} 
+  totalPages={Math.max(totalPages, 1)} 
+  onPageChange={(p) => setPage(p - 1)} 
+/>
         )}
-      </div>
 
-      {/* Bottom bar */}
-      <div className="flex items-center justify-between px-1 text-[9px] text-[var(--color-fg-muted)]">
-        <span>
-          Showing {((activeResponse?.page ?? 1) - 1) * (activeResponse?.pageSize ?? 50) + 1}–
-          {Math.min(activeResponse?.page! * (activeResponse?.pageSize ?? 50), totalRecords)} of {totalRecords}
-        </span>
-        <Link href={buildExportUrl("csv", activeTab, query)} target="_blank" rel="noopener noreferrer" className="text-[var(--color-accent-text)] hover:text-[var(--color-fg-primary)] transition-colors">export all →</Link>
+        {/* Pagination */}
+        <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+          <span className="text-sm text-fg-muted">
+            Page {page + 1} of {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <button
+              disabled={page === 0}
+              onClick={() => setPage(p => p - 1)}
+              className="px-3 py-1 text-sm border border-border rounded-md hover:bg-surface-high disabled:opacity-30"
+            >
+              Previous
+            </button>
+            <button
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage(p => p + 1)}
+              className="px-3 py-1 text-sm border border-border rounded-md hover:bg-surface-high disabled:opacity-30"
+            >
+              Next
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

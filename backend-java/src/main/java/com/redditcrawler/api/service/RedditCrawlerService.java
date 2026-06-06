@@ -22,6 +22,14 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import com.redditcrawler.api.repository.CommentRepository;
+import com.redditcrawler.api.repository.PostRepository;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.redditcrawler.api.repository.CommentRepository;
+import com.redditcrawler.api.repository.PostRepository;
+import org.springframework.transaction.annotation.Transactional;
+
 /**
  * Service that crawls Reddit via the public Reddit API (oauth + JSON endpoint).
  * Uses Redis-backed queue when available; falls back to in-memory CrawlJobStore.
@@ -34,6 +42,8 @@ public class RedditCrawlerService {
     private final RestTemplate restTemplate;
     private final CrawlJobStore jobStore;
     private final RedisCache redisCache;
+    private final PostRepository postRepo;
+    private final CommentRepository commentRepo;
 
     private final AtomicBoolean redisAvailable = new AtomicBoolean(false);
 
@@ -46,10 +56,17 @@ public class RedditCrawlerService {
     @Value("${reddit.api.base-url:https://oauth.reddit.com}")
     private String redditApiBaseUrl;
 
-    public RedditCrawlerService(RestTemplate restTemplate, CrawlJobStore jobStore, RedisCache redisCache) {
+    public RedditCrawlerService(
+            RestTemplate restTemplate,
+            CrawlJobStore jobStore,
+            RedisCache redisCache,
+            PostRepository postRepo,
+            CommentRepository commentRepo) {
         this.restTemplate = restTemplate;
         this.jobStore = jobStore;
         this.redisCache = redisCache;
+        this.postRepo = postRepo;
+        this.commentRepo = commentRepo;
     }
 
     @PostConstruct
@@ -166,10 +183,14 @@ public class RedditCrawlerService {
                     redisCache.updateResults(jobId, crawledPosts);
                     redisCache.updateComments(jobId, allComments);
                     redisCache.updateStatus(jobId, "COMPLETED");
+                    persistPostsToPostgres(jobId, crawledPosts);
+                    persistCommentsToPostgres(jobId, allComments);
                 } else {
                     jobStore.updateResults(jobId, crawledPosts);
                     jobStore.updateComments(jobId, allComments);
                     jobStore.updateStatus(jobId, "COMPLETED");
+                persistPostsToPostgres(jobId, crawledPosts);
+                persistCommentsToPostgres(jobId, allComments);
                 }
             } else {
                 String status = "FAILED_NO_DATA";
@@ -354,5 +375,90 @@ public class RedditCrawlerService {
         public Instant createdUtc;
         public String permalink;
         public String subreddit;
+    }
+    /** Utility: safely convert any object to a trimmed string. */
+    private String asString(Object o) {
+        return o != null ? String.valueOf(o).trim() : "";
+    }
+
+// ──────────────────────────────────
+    // P1-3: PostgreSQL persistence for crawled content
+    // ──────────────────────────────────
+
+    /** Persist crawled posts to the PostgreSQL `posts` table. */
+    @Transactional
+    public void persistPostsToPostgres(String jobId, List<Map<String, Object>> rawPosts) {
+        if (rawPosts == null || rawPosts.isEmpty()) return;
+        log.info("[P1-3] Persisting {} post(s) for jobId={} to PostgreSQL via JPA", rawPosts.size(), jobId);
+        try {
+            List<com.redditcrawler.api.model.Post> entities = new ArrayList<>();
+            for (Map<String, Object> row : rawPosts) {
+                com.redditcrawler.api.model.Post p = new com.redditcrawler.api.model.Post();
+                p.setSubreddit(asString(row.get("subreddit")));
+                p.setTitle(asString(row.get("title")));
+                p.setBody(asString(row.getOrDefault("body", "")));
+                p.setAuthor(asString(row.get("author")));
+                Object u = row.get("upvotes");
+                p.setUpvotes(u instanceof Number n ? n.intValue() : 0);
+                Object cObj = row.get("commentsCount");
+                p.setCommentsCount(cObj instanceof Number n ? n.intValue() : 0);
+                Object tsObj = row.get("createdUtc");
+                try {
+                    p.setCreatedUtc(java.time.Instant.ofEpochSecond((long)(double)((Number)tsObj).doubleValue()));
+                } catch (Exception e) {
+                    p.setCreatedUtc(Instant.now());
+                }
+                p.setPermalink(asString(row.get("permalink")));
+                p.setUrl(asString(row.getOrDefault("url", "")));
+                entities.add(p);
+            }
+            if (!entities.isEmpty()) postRepo.saveAll(entities);
+            log.info("[P1-3] OK {} posts persisted to PostgreSQL for jobId={}", entities.size(), jobId);
+        } catch (Exception e) {
+            log.error("[P1-3] Failed persisting posts for jobId=" + jobId, e);
+        }
+    }
+
+    /** Persist crawled comments to the PostgreSQL `comments` table. */
+    @Transactional
+    public void persistCommentsToPostgres(String jobId, List<Map<String, Object>> rawComments) {
+        if (rawComments == null || rawComments.isEmpty()) return;
+        log.info("[P1-3] Persisting {} comment(s) for jobId={} to PostgreSQL via JPA", rawComments.size(), jobId);
+        try {
+            List<com.redditcrawler.api.model.Comment> entities = new ArrayList<>();
+            for (Map<String, Object> row : rawComments) {
+                com.redditcrawler.api.model.Comment c = new com.redditcrawler.api.model.Comment();
+                c.setRedditId(asString(row.get("id")));
+                String postTitle = asString(row.get("parentPostTitle"));
+                String subredditName = asString(row.get("subreddit"));
+
+                com.redditcrawler.api.model.Post targetPost = null;
+                try {
+                    List<com.redditcrawler.api.model.Post> candidates = postRepo.findBySubreddit(subredditName);
+                    for (com.redditcrawler.api.model.Post candidate : candidates) {
+                        if (candidate.getTitle().equals(postTitle)) {
+                            targetPost = candidate;
+                            break;
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("[P1-3] Could not find post for comment linking: {} on {}", postTitle, subredditName);
+                }
+
+                c.setPost(targetPost != null ? targetPost : new com.redditcrawler.api.model.Post());
+                c.setAuthor(asString(row.get("author")));
+                c.setBody(asString(row.getOrDefault("body", "")));
+                Object upsObj = row.get("upvotes");
+                c.setUpvotes(upsObj instanceof Number n ? n.intValue() : 0);
+                Object depthObj = row.get("depth");
+                c.setDepth(depthObj instanceof Number dn ? dn.intValue() : 0);
+                c.setCreatedAt(java.time.LocalDateTime.now());
+                entities.add(c);
+            }
+            if (!entities.isEmpty()) commentRepo.saveAll(entities);
+            log.info("[P1-3] OK {} comments persisted to PostgreSQL for jobId={}", entities.size(), jobId);
+        } catch (Exception e) {
+            log.error("[P1-3] Failed persisting comments for jobId=" + jobId, e);
+        }
     }
 }

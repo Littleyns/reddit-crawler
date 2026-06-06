@@ -4,8 +4,8 @@ import { ArrowDownUp, ChevronLeft, ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 
-interface Column<T> {
-  key: keyof T;
+interface Column<T = Record<string, any>> {
+  key: string;
   label: string;
   className?: string;
   render?: (row: T) => React.ReactNode;
@@ -33,7 +33,7 @@ export function DataTable<T extends { id: string | number }>({
 
   const toggleSort = (col: Column<T>) => {
     if (sortKey === col.key) setSortDir(d => d === "asc" ? "desc" : "asc");
-    else { setSortKey(col.key); setSortDir("desc"); }
+    else { setSortKey(col.key as keyof T); setSortDir("desc"); }
   };
 
   return (
@@ -61,7 +61,7 @@ export function DataTable<T extends { id: string | number }>({
             <tr key={row.id} className="[&>td]:border-b [&>td]:border-[var(--color-border)]">
               {columns.map((col) => (
                 <td key={String(col.key)} className="px-3 py-1.5 text-xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-accent-soft)]">
-                  {col.render ? col.render(row) : String(row[col.key] ?? "-")}
+                  {col.render ? col.render(row) : String((row as any)[col.key] ?? "-")}
                 </td>
               ))}
             </tr>

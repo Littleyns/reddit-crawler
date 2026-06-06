@@ -72,10 +72,10 @@ export default function DashboardPage() {
 
       {/* ── Stat cards row (7 columns) ── */}
       <div className="dense-grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
-        <StatCard label="Total Posts" value={stats?.totalPosts ?? 0} change="+12.7% vs last week" icon={Layers3} />
-        <StatCard label="Total Comments" value={stats?.totalComments ?? 0} change="+8.4% vs last week" icon={MessageSquareText} />
-        <StatCard label="Active Sessions" value={stats?.totalSessions ?? 0} change={`${stats?.activeSubreddits ?? 0} subreddits`} icon={Activity} />
-        <StatCard label="Queue Depth" value={stats?.queueDepth ?? queueJobs.length} change={`${queueJobs.filter((j) => j.status === "queued").length} queued`} icon={Database} />
+        <StatCard label="Total Posts" value={String(stats?.totalPosts ?? 0)} trend="12.7% vs last week" icon="database" />
+        <StatCard label="Total Comments" value={String(stats?.totalComments ?? 0)} trend="8.4% vs last week" icon="message" />
+        <StatCard label="Active Sessions" value={String(stats?.totalSessions ?? 0)} trend={`${stats?.activeSubreddits ?? 0} subreddits`} icon="clock" />
+        <StatCard label="Queue Depth" value={String(stats?.queueDepth ?? queueJobs.length)} trend={`${queueJobs.filter((j) => j.status === "queued").length} queued`} icon="hash" />
 
         {/* ★★★ NEW: three extra stat cards — inline (string values for %) */}
         <div className="panel-sq-dense p-3 flex flex-col justify-between rounded-none">
