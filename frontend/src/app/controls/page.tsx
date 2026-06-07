@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useCrawlerStatus } from "@/hooks/use-reddit-crawler";
 import { StatusBadge } from "@/components/ui/status-badge";

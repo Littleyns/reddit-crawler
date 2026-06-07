@@ -20,6 +20,8 @@ export interface CrawlJob {
   retryCount: number;
   maxRetries: number;
   estimatedMinutes: number;
+  startedAt?: string;
+  completedAt?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -259,6 +259,52 @@ public class RedditApiRotationService {
         log.info("[P4-1] Batch refresh done — OK: {}, FAIL: {}", successCount, failCount);
     }
 
+    /** Refresh a single key's tokens via Reddit OAuth — exposed for scheduler use (P4-1) */
+    public RedditApiKeyConfig refreshTokenByAlias(RedditApiKeyConfig config) {
+        try {
+            if (config.getRefreshToken() == null || config.getRefreshToken().isEmpty()) {
+                refreshTokenViaClientCredentials(config);
+                return apiKeyRepo.findByAlias(config.getAlias()).orElse(null);
+            }
+
+            String credBase64 = Base64.getEncoder().encodeToString(
+                    (config.getClientId() + ":" + config.getClientSecret()).getBytes(StandardCharsets.ISO_8859_1));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", "Basic " + credBase64);
+            headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+            Map<String, String> body = new LinkedHashMap<>();
+            body.put("grant_type", "refresh_token");
+            body.put("refresh_token", config.getRefreshToken());
+
+            HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, headers);
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    "https://www.reddit.com/api/v1/access_token", HttpMethod.POST, entity, Map.class);
+
+            if (resp.getBody() != null) {
+                String accessToken = (String) resp.getBody().get("access_token");
+                int expiresIn = ((Number) resp.getBody().getOrDefault("expires_in", 3600)).intValue();
+                String refreshTokenStr = (String) resp.getBody().getOrDefault("refresh_token", config.getRefreshToken());
+                LocalDateTime expiresAt = LocalDateTime.now()
+                        .plusSeconds(expiresIn > 0 ? expiresIn : 3600);
+
+                apiKeyRepo.updateTokens(config.getId(), accessToken, refreshTokenStr, expiresAt);
+                log.info("[P4-1] Token refreshed for alias '{}' (expires in {}s)", config.getAlias(), expiresIn);
+                return apiKeyRepo.findByAlias(config.getAlias()).orElse(null);
+            } else {
+                log.error("[P4-1] Token refresh returned empty body for alias '{}'", config.getAlias());
+                // Fallback to client_credentials
+                refreshTokenViaClientCredentials(config);
+                return apiKeyRepo.findByAlias(config.getAlias()).orElse(null);
+            }
+        } catch (Exception e) {
+            log.error("[P4-1] Token refresh failed for alias '" + config.getAlias() + "': " + e.getMessage(), e);
+            refreshTokenViaClientCredentials(config);
+            return apiKeyRepo.findByAlias(config.getAlias()).orElse(null);
+        }
+    }
+
     /** Refresh a single key's tokens via OAuth2 client_credentials or refresh_token grant */
     private boolean refreshToken(RedditApiKeyConfig config) {
         try {

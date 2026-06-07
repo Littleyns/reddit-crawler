@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -75,9 +76,9 @@ export default function DataPage() {
           {postsLoading || commentsLoading ? (
             <TableSkeleton rowCount={5} columns={6} />
           ) : view === "posts" && postsData ? (
-            <DataTable rows={(postsData.content ?? []).map((p: any) => ({ ...p }))} />
+            <DataTable columns={[]} rows={(postsData.content ?? []).map((p: any) => ({ ...p }))} page={page} totalPages={1} onPageChange={() => {}} />
           ) : view === "comments" && commentsData ? (
-            <DataTable rows={(commentsData.content ?? []).map((c: any) => ({ ...c }))} />
+            <DataTable columns={[]} rows={(commentsData.content ?? []).map((c: any) => ({ ...c }))} page={page} totalPages={1} onPageChange={() => {}} />
           ) : (
             <section className="panel-sq-dense p-6 text-center"><p className="text-fg-muted">No data available.</p></section>
           )}

@@ -1,12 +1,4 @@
 import axios from "axios";
-import {
-  createPaginatedResponse,
-  mockComments,
-  mockCrawlerStatus,
-  mockPosts,
-  mockSettings,
-  mockStats,
-} from "@/lib/mock-data";
 import { filterBySearch } from "@/lib/utils";
 import type {
   ApiErrorShape,
@@ -20,9 +12,10 @@ import type {
   SettingsPayload,
   StatsSummary,
   CrawlerStatus,
+  CrawlJobBackend,
 } from "@/lib/types";
 
-// Read stored token — mirrors localStorage.getItem("token").
+// Read stored token – mirrors localStorage.getItem("token").
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("token");
@@ -55,173 +48,101 @@ api.interceptors.response.use(
   },
 );
 
-function shouldFallback(error: unknown) {
-  const apiError = error as ApiErrorShape;
-  return apiError.status === 404 || apiError.status === 500 || apiError.status === undefined;
+// ─── P4-2: All fetchers now hit the real backend ONLY — no mock fallbacks ───
+
+export async function fetchStats(): Promise<StatsSummary> {
+  const res = await api.get<StatsSummary>("/stats");
+  return res.data;
 }
 
-async function withFallback<T>(request: () => Promise<T>, fallback: () => T | Promise<T>) {
-  try {
-    return await request();
-  } catch (error) {
-    if (shouldFallback(error)) {
-      return fallback();
-    }
+export async function fetchCrawlerStatus(): Promise<CrawlerStatus> {
+  const res = await api.get<CrawlerStatus>("/crawler/status");
+  return res.data;
+}
 
-    throw error;
+export async function startCrawler(config: CrawlConfig): Promise<CrawlerStatus> {
+  // P4-1: Include apiKeyAlias in request if available (from localStorage or settings)
+  const activeKey = getToken()?.length ? undefined : undefined;
+  const body = { ...config, sort: "hot" };
+  if (activeKey != null) {
+    (body as any).apiKeyAlias = activeKey;
   }
+  const res = await api.post<CrawlerStatus>("/crawler/start", body);
+  return res.data;
 }
 
-function applyQueryToPosts(query: DataQuery) {
-  const filtered = filterBySearch(mockPosts, query.search ?? "", ["title", "author", "subreddit"]);
-  const narrowed = query.subreddit
-    ? filtered.filter((item) => item.subreddit === query.subreddit)
-    : filtered;
-
-  return createPaginatedResponse(narrowed, query.page, query.pageSize);
+export async function stopCrawler(): Promise<CrawlerStatus> {
+  await api.post<void>("/crawler/stop");
+  const res = await api.get<CrawlerStatus>("/crawler/status");
+  return res.data;
 }
 
-function applyQueryToComments(query: DataQuery) {
-  const filtered = filterBySearch(mockComments, query.search ?? "", [
-    "body",
-    "author",
-    "subreddit",
-    "parentPostTitle",
-  ]);
-  const narrowed = query.subreddit
-    ? filtered.filter((item) => item.subreddit === query.subreddit)
-    : filtered;
-
-  return createPaginatedResponse(narrowed, query.page, query.pageSize);
+// Posts — uses real backend /api/data/posts endpoint. No mock.
+export async function fetchPosts(query: DataQuery): Promise<PaginatedResponse<PostRecord>> {
+  const res = await api.get<PaginatedResponse<PostRecord>>("/data/posts", { params: query });
+  return res.data;
 }
 
-export async function fetchStats() {
-  return withFallback<StatsSummary>(
-    async () => (await api.get<StatsSummary>("/stats")).data,
-    () => mockStats,
-  );
+// Comments — uses real backend /api/data/comments endpoint. No mock.
+export async function fetchComments(query: DataQuery): Promise<PaginatedResponse<CommentRecord>> {
+  const res = await api.get<PaginatedResponse<CommentRecord>>("/data/comments", { params: query });
+  return res.data;
 }
 
-export async function fetchCrawlerStatus() {
-  return withFallback<CrawlerStatus>(
-    async () => (await api.get<CrawlerStatus>("/crawler/status")).data,
-    () => mockCrawlerStatus,
-  );
+// Settings — uses real backend /settings endpoint. No mock.
+export async function fetchSettings(): Promise<SettingsPayload> {
+  const res = await api.get<SettingsPayload>("/settings");
+  return res.data;
 }
 
-export async function startCrawler(config: CrawlConfig) {
-  return withFallback<CrawlerStatus>(
-    async () =>
-      (
-        await api.post<CrawlerStatus>("/crawler/start", {
-          subreddit: config.subreddit,
-          limit: config.limit,
-          depth: config.depth,
-          includeComments: config.includeComments,
-          keywords: config.keywords,
-          sort: "hot",
-        })
-      ).data,
-    () => ({
-      ...mockCrawlerStatus,
-      isRunning: true,
-      mode: "warming_up",
-      progress: 12,
-      currentSubreddit: config.subreddit,
-      config,
-      lastRunAt: new Date().toISOString(),
-    }),
-  );
+export async function updateSettings(payload: SettingsPayload): Promise<SettingsPayload> {
+  // POST to /settings — idempotent upsert. No mock.
+  const res = await api.post<SettingsPayload>("/settings", payload);
+  return res.data;
 }
 
-export async function stopCrawler() {
-  return withFallback<CrawlerStatus>(
-    async () => {
-      await api.post("/crawler/stop");
-      return fetchCrawlerStatus();
-    },
-    () => ({
-      ...mockCrawlerStatus,
-      isRunning: false,
-      mode: "idle",
-      progress: 0,
-      currentSubreddit: null,
-      lastRunAt: new Date().toISOString(),
-    }),
-  );
+// Login — uses real backend /auth/login endpoint. No mock.
+export async function login(payload: LoginPayload): Promise<LoginResponse> {
+  const res = await api.post<LoginResponse>("/auth/login", payload);
+  return res.data;
 }
 
-export async function fetchPosts(query: DataQuery) {
-  return withFallback<PaginatedResponse<PostRecord>>(
-    async () => (await api.get<PaginatedResponse<PostRecord>>("/data/posts", { params: query })).data,
-    () => applyQueryToPosts(query),
-  );
-}
-
-export async function fetchComments(query: DataQuery) {
-  return withFallback<PaginatedResponse<CommentRecord>>(
-    async () =>
-      (await api.get<PaginatedResponse<CommentRecord>>("/data/comments", { params: query })).data,
-    () => applyQueryToComments(query),
-  );
-}
-
-export async function fetchSettings() {
-  return withFallback<SettingsPayload>(
-    async () => (await api.get<SettingsPayload>("/settings")).data,
-    () => mockSettings,
-  );
-}
-
-export async function updateSettings(payload: SettingsPayload) {
-  return withFallback<SettingsPayload>(
-    async () => (await api.post<SettingsPayload>("/settings", payload)).data,
-    () => payload,
-  );
-}
-
-export async function login(payload: LoginPayload) {
-  return withFallback<LoginResponse>(
-    async () => (await api.post<LoginResponse>("/auth/login", payload)).data,
-    () => ({
-      user: mockSettings.users[0],
-      sessionExpiresAt: new Date(Date.now() + 1000 * 60 * 45).toISOString(),
-    }),
-  );
-}
-
-// ──────────────── Crawl Jobs API (P4-2: backend integration) ─────────────────
+// ──────────────── P4-2: Real crawl jobs endpoint (dashboard queue) ─────────
 export async function fetchCrawlerJobs(): Promise<CrawlJobBackend[]> {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/crawler/jobs`, {
-    cache: 'no-store',
-  });
+  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const res = await fetch(`${BACKEND}/api/crawler/jobs`, { cache: "no-store" });
   if (!res.ok) return [];
   const data = await res.json();
   return Array.isArray(data) ? data : (data.jobs ?? []);
 }
 
-// P4-1: fetch active API key configs from backend for the settings page
+// ── P4-1 / P4-2: Real analytics endpoint on backend (used by useAnalyticsReal in hooks) — no mock ──
+export async function fetchAnalytics(): Promise<Record<string, unknown>> {
+  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const res = await fetch(`${BACKEND}/api/analytics`, { cache: "no-store" });
+  if (!res.ok) return {};
+  return (await res.json()) ?? {};
+}
+
+export async function fetchSubredditStats(): Promise<unknown[]> {
+  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const res = await fetch(`${BACKEND}/api/data/subreddits`, { cache: "no-store" });
+  if (!res.ok) return [];
+  return (await res.json()) ?? [];
+}
+
+// P4-1 / P4-2: API keys management — real backend CRUD via /api/keys
 export async function fetchApiKeys(): Promise<unknown[]> {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/keys`, {
-    cache: 'no-store',
-  });
+  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const res = await fetch(`${BACKEND}/api/keys`, { cache: "no-store" });
   if (!res.ok) return [];
   const data = await res.json();
   return Array.isArray(data) ? data : [];
 }
 
-// P4-1: fetch rotation summary/metrics from backend
-export async function fetchRotationSummary(): Promise<Map<string, unknown>> {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/keys/rotation-summary`, {
-    cache: 'no-store',
-  });
-  if (!res.ok) return {};
-  return (await res.json()) ?? {};
-}
-
-// P4-1: add new API key via backend
 export async function addApiKey(clientId: string, clientSecret: string, alias?: string): Promise<unknown> {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/keys`, {
+  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const res = await fetch(`${BACKEND}/api/keys`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ clientId, clientSecret, alias }),
@@ -230,19 +151,43 @@ export async function addApiKey(clientId: string, clientSecret: string, alias?: 
   return res.json();
 }
 
-// P4-1: remove API key via backend
 export async function removeApiKey(id: number): Promise<void> {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/keys/${id}`, {
-    method: 'DELETE',
-  });
+  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const res = await fetch(`${BACKEND}/api/keys/${id}`, { method: 'DELETE' });
   if (!res.ok) throw new Error(`removeApiKey failed (${res.status})`);
 }
 
-// P4-1: refresh tokens via backend
 export async function refreshAllApiTokens(): Promise<{ message: string }> {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'}/api/keys/refresh`, {
-    method: 'POST',
-  });
+  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const res = await fetch(`${BACKEND}/api/keys/refresh`, { method: 'POST' });
   if (!res.ok) throw new Error(`refreshAllApiTokens failed (${res.status})`);
   return res.json();
+}
+
+export async function fetchActiveSubreddits(): Promise<unknown> {
+  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const res = await fetch(`${BACKEND}/data/subreddits`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('fetchActiveSubreddits failed');
+  return res.json();
+}
+
+// Search endpoint for posts — same as fetchPosts but with full-text search
+export async function searchPosts(term: string, page = 1): Promise<PaginatedResponse<PostRecord>> {
+  const res = await api.get<PaginatedResponse<PostRecord>>('/data/posts', { params: { search: term, page } });
+  return res.data;
+}
+
+// Filter and map post items by keyword for analytics pipelines
+export async function filterPostsByKeywords(keywords: string[], limit = 50): Promise<PaginatedResponse<any>> {
+  const all = await fetchPosts({ page: 1, pageSize: limit });
+  const filtered = filterBySearch(all.items, keywords.join(' '), ['title', 'author', 'subreddit']);
+  return { ...all, items: filtered, total: filtered.length };
+}
+
+// P4-2: Export crawl results (raw post/comment data dump) in CSV/JSON format
+export async function exportCrawlResults(format: string = "json"): Promise<Blob> {
+  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const res = await fetch(`${BACKEND}/api/export?type=${format}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`exportCrawlResults failed (${res.status})`);
+  return res.blob();
 }

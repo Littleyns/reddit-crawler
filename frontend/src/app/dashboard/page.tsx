@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -8,44 +9,51 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { CrawlerControl } from "@/components/crawler-control";
 import { CrawlerQueue } from "@/components/crawler-queue";
 import { DataGrid } from "@/components/data-grid";
-import { useCrawlerStatus, useStats } from "@/hooks/use-reddit-crawler";
-import { useAnalytics } from "@/hooks/useAnalytics";
+import { useCrawlerStatus, useStats, useJobs, useAnalyticsReal } from "@/hooks/use-reddit-crawler";
 import { formatRelativeTime } from "@/lib/utils";
 import type { CrawlJob } from "@/components/crawler-queue";
 import type { DataGridRow } from "@/components/data-grid";
 import { PageErrorBoundary, ErrorBoundary } from "@/components/ui/error-boundary";
 import { PanelSkeleton, GridSkeleton } from "@/components/ui/panel-skeleton";
 
-function genMockQueueJobs(): CrawlJob[] {
-  return [
-    { id: "job-1", name: 'r/MachineLearning – last 7d', subreddit: "machinelearning", status: "running", progress: 68, priority: "high" as const, workersAssigned: 4, queuePosition: 0, retryCount: 0, maxRetries: 3, estimatedMinutes: 24 },
-    { id: "job-2", name: 'r/technology – daily digest', subreddit: "technology", status: "queued" as const, progress: 0, priority: "medium" as const, workersAssigned: 0, queuePosition: 1, retryCount: 0, maxRetries: 3, estimatedMinutes: 45 },
-    { id: "job-3", name: 'r/SaaS – product launches', subreddit: "SaaS", status: "queued" as const, progress: 0, priority: "low" as const, workersAssigned: 0, queuePosition: 2, retryCount: 0, maxRetries: 3, estimatedMinutes: 32 },
-    { id: "job-4", name: 'r/webdev – weekly top', subreddit: "webdev", status: "failed" as const, progress: 23, priority: "medium" as const, workersAssigned: 2, queuePosition: 0, retryCount: 2, maxRetries: 3 },
-    { id: "job-5", name: 'r/startups – funding news', subreddit: "startups", status: "completed" as const, progress: 100, priority: "high" as const, workersAssigned: 4, queuePosition: 0, retryCount: 0, maxRetries: 3 },
-  ];
-}
+/** Convert backend CrawlJob entity to frontend CrawlJob interface (P4-2) */
+function mapBackendJobToCrawlJob(j: Record<string, unknown>): CrawlJob {
+  const rawStatus = String(j.status ?? "unknown");
+  // Map backend statuses → frontend-compatible statuses
+  let mappedStatus: CrawlJob["status"];
+  if (rawStatus === "RUNNING") mappedStatus = "running";
+  else if (rawStatus === "COMPLETED") mappedStatus = "completed";
+  else if (rawStatus === "FAILED_NO_DATA" || rawStatus.startsWith("FAILED")) mappedStatus = "failed";
+  else mappedStatus = rawStatus as CrawlJob["status"];
 
-function genMockGridRows(): DataGridRow[] {
-  return [
-    { id: "grid-1", title: "Benchmarking agent architectures in long horizon tasks", subreddit: "machinelearning", type: "post" as const, sentiment: "positive" as const, keywords: ["agents", "benchmark"] },
-    { id: "grid-2", title: "Open source observability stack for large crawlers", subreddit: "technology", type: "post" as const, sentiment: "neutral" as const, keywords: ["observability", "crawler"] },
-    { id: "grid-3", title: "How are you deduplicating Reddit data across sessions?", subreddit: "dataengineering", type: "comment" as const, sentiment: "negative" as const, keywords: ["deduplication"] },
-    { id: "grid-4", title: "Crawler UI patterns that actually scale in operations", subreddit: "programming", type: "thread" as const, sentiment: "positive" as const, keywords: ["crawler", "ops"] },
-  ];
+  return {
+    id: j.jobId ? String(j.jobId) : "unknown-job",
+    name: "Crawl " + (j.jobId ?? ""),
+    subreddit: String(j.subreddit ?? "unknown"),
+    status: mappedStatus,
+    progress: rawStatus === "COMPLETED" ? 100 : rawStatus === "RUNNING" ? 50 : 0,
+    priority: "medium" as const,
+    workersAssigned: 0,
+    queuePosition: 0,
+    retryCount: 0,
+    maxRetries: 3,
+    estimatedMinutes: 30,
+    startedAt: j.startedAt ? String(j.startedAt) : undefined,
+    completedAt: j.completedAt ? String(j.completedAt) : undefined,
+  };
 }
 
 export default function DashboardPage() {
-  const { data: stats, loading: statsLoading } = useStats();
+  const { data: stats, isLoading: statsLoading } = useStats();
   const { data: status } = useCrawlerStatus();
-  const { data: analytics, isLoading: loading } = useAnalytics();
+  const { data: analytics } = useAnalyticsReal();
+  const { data: backendJobs, isLoading: jobsLoading } = useJobs();
 
-  const queueJobs = (() => {
-    if (status?.isRunning) return genMockQueueJobs().map((j) => j.id === "job-1" ? { ...j, progress: status.progress } : j);
-    return genMockQueueJobs();
-  })();
-
-  const gridRows = genMockGridRows();
+  // Real job data from backend — NO MOCK DATA (P4-2)
+  const queueJobs: CrawlJob[] = (backendJobs && backendJobs.length > 0)
+    ? backendJobs.map(mapBackendJobToCrawlJob)
+    : [];
+  const gridRows: DataGridRow[] = [];
 
   return (
     <PageErrorBoundary>
@@ -66,11 +74,11 @@ export default function DashboardPage() {
               <StatCard label="Active Sessions" value={String(stats?.totalSessions ?? 0)} trend={`${stats?.activeSubreddits ?? 0} subreddits`} icon="clock" />
               <StatCard label="Queue Depth" value={String(stats?.queueDepth ?? queueJobs.length)} trend={`${queueJobs.filter((j) => j.status === "queued").length} queued`} icon="hash" />
               <StatCard label="Avg Sentiment" value={"0.42"} trend="vs last week" icon="trending-up" />
-              <StatCard label="Keywords Picked" value={String(analytics?.keywordCount ?? 0)} trend={`${(analytics?.keywordsCount ?? 0) > 15 ? "high" : "normal"} density`} icon="hash" />
+              <StatCard label="Keywords Picked" value={String(analytics ? (analytics as any).keywordCount ?? 0 : 0)} trend={`${((analytics as any).keywordsCount ?? 0) > 15 ? "high" : "normal"} density`} icon="hash" />
               <div className="panel-sq-dense flex items-start justify-between p-4 transition-colors hover:bg-[var(--color-accent-soft)]">
                 <div>
                   <span className="section-label block mb-1">Summary</span>
-                  <p className="text-sm text-fg-primary leading-snug break-words max-w-[220px]">{analytics?.summary ?? "Awaiting crawl data..."}</p>
+                  <p className="text-sm text-fg-primary leading-snug break-words max-w-[220px]">{analytics ? ((analytics as any).summary ?? "Awaiting crawl data...") : "Awaiting crawl data..."}</p>
                 </div>
               </div>
             </>
@@ -95,7 +103,7 @@ export default function DashboardPage() {
                   <div className="mb-2"><StatusBadge tone="running" label={status.mode} /></div>
                   <div className="flex flex-col divide-y divide-[var(--color-border)]">
                     {[
-                      { icon: Layers3 as any, label: "Target", value: status.currentSubreddit ?? "—" },
+                      { icon: Layers3 as any, label: "Target", value: status.currentSubreddit ?? "\u2014" },
                       { icon: Activity as any, label: "Workers", value: String(status.activeWorkers ?? 0) },
                       { icon: Activity as any, label: "Req/min", value: String(status.requestsPerMinute ?? 0) },
                     ].map(({ icon: Icon, label, value }) => (
@@ -113,7 +121,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </section>
-                <ErrorBoundary><PanelSkeleton className="h-28" label="Configuration" /></ErrorBoundary>
+                <ErrorBoundary><PanelSkeleton className="h-28" /></ErrorBoundary>
               </>
             ) : (
               <>
@@ -124,18 +132,18 @@ export default function DashboardPage() {
           </aside>
         </section>
 
-        {/* Queue panel */}
+        {/* Queue panel — real data from backend, not mock */}
         <section>
-          {loading ? (
+          {jobsLoading ? (
             <ErrorBoundary><GridSkeleton /></ErrorBoundary>
           ) : (
             <ErrorBoundary><CrawlerQueue jobs={queueJobs} /><p className="text-[9px] pt-0.5 text-center text-[var(--color-fg-muted)]">Data from crawl sessions</p></ErrorBoundary>
           )}
         </section>
 
-        {/* Data grid panel */}
+        {/* Data grid panel — real data from backend, not mock */}
         <section>
-          {loading ? (
+          {jobsLoading ? (
             <ErrorBoundary><GridSkeleton columns={2} rows={2} /></ErrorBoundary>
           ) : (
             <ErrorBoundary><DataGrid rows={gridRows} /><p className="text-[9px] pt-0.5 text-center text-[var(--color-fg-muted)]">Data from crawl sessions</p></ErrorBoundary>

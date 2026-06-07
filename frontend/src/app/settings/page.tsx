@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { cn } from "@/lib/utils";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -72,7 +73,7 @@ export default function SettingsPage() {
               {activeTab === "credentials" && (
                 <section className="panel-sq-dense p-4">
                   <form onSubmit={form.handleSubmit(() => {} )} className="flex flex-col gap-4 max-w-lg">
-                    <ApiKeyInput form={form as any} />
+                    <ApiKeyInput value={String(form.watch("apiKey"))} onChange={(v) => form.setValue("apiKey", v)} provider="reddit" />
                     <select {...form.register("exportFormat")} className="form-input">{["csv", "json"].map(f => <option key={f} value={f}>{f}</option>)}</select>
                     <button type="submit" disabled={saveMutation.isPending} className="flex items-center gap-2 bg-accent-primary text-white px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60">
                       {saveMutation.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save Settings
