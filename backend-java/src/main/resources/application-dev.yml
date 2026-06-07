@@ -1,26 +1,7 @@
-# Dev profile — explicit config so JwtAuthFilter does NOT crash on missing 'app.jwt.secret'
-# Loaded when SPRING_PROFILES_ACTIVE=dev (default)
-
-app:
-  jwt:
-    secret: "change-this-in-production-jwt-secret-key-please"
-    expiration-ms: 86400000     # 24h access token
-    refresh-expiration-ms: 604800000   # 7d refresh token
-
-# Use 'update' instead of 'validate' so Hibernate auto-diffs schema at startup.
-# Validate causes hard crashes on every column/table mismatch — painful during dev.
+# Dev profile: keep ddl-auto for fast iteration during development
 spring:
+  flyway:
+    enabled: false
   jpa:
     hibernate:
       ddl-auto: update
-
-security:
-  jwt-enabled: true
-  allowed-origins:
-    - http://localhost:3000
-    - http://localhost:5173
-
-logging:
-  level:
-    com.redditcrawler.api: DEBUG
-    org.springframework.security: DEBUG
