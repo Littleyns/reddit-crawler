@@ -381,33 +381,6 @@ public class RedditApiRotationService {
         }
     }
 
-    /** Refresh tokens using the Reddit API via OAuth2. */
-    private ResponseEntity<Map> refreshTokenByAlias(RedditApiKeyConfig config) {
-        try {
-            if (config.getRefreshToken() == null || config.getRefreshToken().isEmpty()) {
-                return refreshTokenViaClientCredentials(config);
-            }
-
-            String credBase64 = Base64.getEncoder().encodeToString(
-                    (config.getClientId() + ":" + config.getClientSecret()).getBytes(StandardCharsets.ISO_8859_1));
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.set("Authorization", "Basic " + credBase64);
-            headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
-
-            Map<String, String> body = new LinkedHashMap<>();
-            body.put("grant_type", "refresh_token");
-            body.put("refresh_token", config.getRefreshToken());
-
-            HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, headers);
-            return restTemplate.exchange(
-                    "https://www.reddit.com/api/v1/access_token", HttpMethod.POST, entity, Map.class);
-        } catch (Exception e) {
-            log.warn("[P4-1] Token refresh via alias '{}' failed — trying client_credentials: {}", 
-                    config.getAlias(), e.getMessage());
-            return refreshTokenViaClientCredentials(config);
-        }
-    }
 
     private ResponseEntity<Map> refreshTokenViaClientCredentials(RedditApiKeyConfig config) {
         try {

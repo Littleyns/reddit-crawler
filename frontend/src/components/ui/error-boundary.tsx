@@ -1,6 +1,6 @@
 "use client";
 
-import { Component, ErrorInfo, ReactNode, useCallback } from "react";
+import { Component, ErrorInfo, ReactNode } from "react";
 
 interface Props {
   fallback?: ReactNode;
@@ -30,9 +30,9 @@ export class ErrorBoundary extends Component<Props, State> {
     this.props.onError?.(error, info);
   }
 
-  public reset = useCallback(() => {
+  public reset = () => {
     this.setState({ hasError: false, error: null });
-  }, []);
+  };
 
   render() {
     if (this.state.hasError) {
