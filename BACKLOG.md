@@ -33,8 +33,10 @@ Reddit Crawler — Autonomous Dev Factory Backlog
   - DONE: Full analytics page with recharts LineChart, BarChart, PieChart; useAnalytics hook polling backend
 
 ### P3 — Polish (next cycle)
-- [ ] **#P3-1**: Backend integration test suite (WebMvcTest + MockRestServiceServer)
-- [ ] **#P3-2**: Frontend error boundaries + loading skeletons for all panels
+- [x] **#P3-1**: Backend integration test suite (WebMvcTest + MockRestServiceServer)
+  - FIXED: Wrote CrawlerIntegrationTest, AnalyticsIntegrationTest, HealthIntegrationTest with WebMvcTest slice
+- [x] **#P3-2**: Frontend error boundaries + loading skeletons for all panels
+  - FIXED: Wrapped all pages in PageErrorBoundary, added PanelSkeleton/GridSkeleton/TableSkeleton loading states to dashboard, controls, analytics, data, settings
 - [ ] **#P4-1**: Multi-config Reddit API key rotation in task queue
 - [ ] **#P4-2**: Full integration: frontend → real backend data (remove all mock/stub)
 - [ ] **#P4-3**: Flyway migration scripts replacing ddl-auto=update for production

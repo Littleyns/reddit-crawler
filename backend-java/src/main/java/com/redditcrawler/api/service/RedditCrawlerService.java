@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import com.redditcrawler.api.repository.CommentRepository;
 import com.redditcrawler.api.repository.CrawlerJobRepository;
 import com.redditcrawler.api.model.CrawlerJob;
+import com.redditcrawler.api.model.RedditApiKeyConfig;
 import com.redditcrawler.api.repository.PostRepository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Service that crawls Reddit via the public Reddit API (oauth + JSON endpoint).
  * Uses Redis-backed queue when available; falls back to in-memory CrawlJobStore.
+ * P4-1: Integrates with RedditApiRotationService for multi-config key rotation.
  */
 @Service
 public class RedditCrawlerService {
@@ -45,16 +47,16 @@ public class RedditCrawlerService {
     private final RedisCache redisCache;
     private final PostRepository postRepo;
     private final CommentRepository commentRepo;
-
     private final CrawlerJobRepository jobRepo;
+    private final RedditApiRotationService rotationService;
 
     private final AtomicBoolean redisAvailable = new AtomicBoolean(false);
 
     @Value("${reddit.oauth.client-id:}")
-    private String clientId;
+    private String fallbackClientId;
 
     @Value("${reddit.oauth.client-secret:}")
-    private String clientSecret;
+    private String fallbackClientSecret;
 
     @Value("${reddit.api.base-url:https://oauth.reddit.com}")
     private String redditApiBaseUrl;
@@ -65,13 +67,15 @@ public class RedditCrawlerService {
             RedisCache redisCache,
             PostRepository postRepo,
             CommentRepository commentRepo,
-            CrawlerJobRepository jobRepo) {
+            CrawlerJobRepository jobRepo,
+            RedditApiRotationService rotationService) {
         this.restTemplate = restTemplate;
         this.jobStore = jobStore;
         this.redisCache = redisCache;
         this.postRepo = postRepo;
         this.commentRepo = commentRepo;
         this.jobRepo = jobRepo;
+        this.rotationService = rotationService;
     }
 
     @PostConstruct
@@ -82,6 +86,15 @@ public class RedditCrawlerService {
             log.info("[REDIS-QUEUE] Redis connection established — using distributed queue");
         } else {
             log.warn("[REDIS-QUEUE] Redis not available — falling back to in-memory CrawlJobStore");
+        }
+
+        // Log rotation service status on startup
+        int activeKeys = rotationService.getActiveKeyCount();
+        log.info("[P4-1] Reddit API key rotation active keys: {}", activeKeys);
+        if (activeKeys == 0) {
+            log.warn("[P4-1] No configured multi-config keys — crawler will use legacy fallback credentials only");
+        } else {
+            log.info("[P4-1] Multi-config key rotation ENABLED — crawling will rotate across {} keys", activeKeys);
         }
     }
 
@@ -95,6 +108,7 @@ public class RedditCrawlerService {
 
     /**
      * Start a crawl job for the given subreddit. Returns the jobId.
+     * P4-1: Uses rotating API keys when configured, falls back to legacy credentials.
      */
     public String startCrawl(String subreddit, Map<String, Object> config) {
         if (redisAvailable.get()) {
@@ -113,7 +127,14 @@ public class RedditCrawlerService {
         job.put("completedAt", null);
 
         jobStore.put(jobId, job);
+        
+        // P4-1: Pick a rotating key for this crawl session (don't advance index during crawl)
+        String authToken = getCrawlAuthToken();
+        log.info("[P4-1] Crawl jobId={} starting with token from key: {}", 
+                jobId, authToken != null && !authToken.isEmpty() ? "configured" : "legacy");
+        
         doCrawlSync(jobId, subreddit, config);
+        
         // Also persist to PostgreSQL for durable storage and analytics queries
         CrawlerJob entity = new CrawlerJob();
         entity.setJobId(jobId);
@@ -125,10 +146,46 @@ public class RedditCrawlerService {
         return jobId;
     }
 
+    /**
+     * Get an auth token using the rotation service when available, falling back to static credentials.
+     */
+    private String getCrawlAuthToken() {
+        // Prefer rotating keys
+        RedditApiKeyConfig activeKey = rotationService.peekCurrentApiKey();
+        if (activeKey != null && activeKey.getAccessToken() != null && !activeKey.getAccessToken().isEmpty()) {
+            log.debug("[P4-1] Using rotating key '{}' access token", activeKey.getAlias());
+            return activeKey.getAccessToken();
+        }
+        
+        // Fallback to legacy static credentials
+        if ((fallbackClientId != null && !fallbackClientId.isBlank()) && 
+            (fallbackClientSecret != null && !fallbackClientSecret.isBlank())) {
+            log.debug("[P4-1] Falling back to legacy OAuth credentials");
+            try {
+                return getAccessTokenFrom(fallbackClientId, fallbackClientSecret);
+            } catch (Exception e) {
+                log.error("[P4-1] Legacy credential auth failed: " + e.getMessage());
+            }
+        }
+        
+        return null;
+    }
+
     @SuppressWarnings("unchecked")
     private void doCrawlSync(String jobId, String subreddit, Map<String, Object> config) {
         try {
-            String accessToken = getAccessToken();
+            // Get token via the rotation service or fallback
+            String accessToken = getCrawlAuthToken();
+            
+            if (accessToken == null || accessToken.isBlank()) {
+                log.error("[P4-1] No auth tokens available — cannot crawl '" + subreddit + "'");
+                String status = "FAILED_NO_AUTH";
+                if (redisAvailable.get()) redisCache.updateStatus(jobId, status);
+                else jobStore.updateStatus(jobId, status);
+                persistJobStatusToJpa(jobId, status, null);
+                return;
+            }
+
             int limit = 25;
             if (config != null && config.get("limit") instanceof Integer i) {
                 limit = Math.min(i, 100);
@@ -173,12 +230,10 @@ public class RedditCrawlerService {
 
                         crawledPosts.add(postJson);
 
-                        // Collect comment base URL from first child (or construct it).
                         if (d.get("name") != null) {
                             commentBase = String.valueOf(d.get("name"));
                         }
 
-                        // Recurse into the comments tree of this post.
                         Object repliesObj = d.get("replies");
                         if (repliesObj instanceof Map<?, ?> repliesMap && !repliesMap.isEmpty()) {
                             List<Map<String, Object>> children_map = (List<Map<String, Object>>) repliesMap.get("data");
@@ -203,32 +258,27 @@ public class RedditCrawlerService {
                     jobStore.updateComments(jobId, allComments);
                     jobStore.updateStatus(jobId, "COMPLETED");
                     persistJobStatusToJpa(jobId, "COMPLETED", crawledPosts);
-                persistPostsToPostgres(jobId, crawledPosts);
-                persistCommentsToPostgres(jobId, allComments);
+                    persistPostsToPostgres(jobId, crawledPosts);
+                    persistCommentsToPostgres(jobId, allComments);
                 }
             } else {
                 String status = "FAILED_NO_DATA";
-                if (redisAvailable.get()) {
-                    redisCache.updateStatus(jobId, status);
-                } else {
-                    jobStore.updateStatus(jobId, status);
-                }
+                if (redisAvailable.get()) redisCache.updateStatus(jobId, status);
+                else jobStore.updateStatus(jobId, status);
             }
         } catch (Exception e) {
             log.error("Crawl failed for jobId=" + jobId, e);
             String error = "FAILED:" + e.getMessage();
-            if (redisAvailable.get()) {
-                redisCache.updateStatus(jobId, error);
-            } else {
-                jobStore.updateStatus(jobId, error);
-            }
+            if (redisAvailable.get()) redisCache.updateStatus(jobId, error);
+            else jobStore.updateStatus(jobId, error);
             persistJobStatusToJpa(jobId, error, null);
         }
     }
 
-    private String getAccessToken() throws Exception {
+    /** Get access token from static credentials directly. */
+    private String getAccessTokenFrom(String clientId, String clientSecret) throws Exception {
         if (clientId == null || clientId.isBlank() || clientSecret == null || clientSecret.isBlank()) {
-            log.warn("Reddit OAuth credentials not configured — crawl will return no data");
+            log.warn("OAuth credentials not configured for legacy auth");
             return "";
         }
 
@@ -296,12 +346,11 @@ public class RedditCrawlerService {
 
     private String cleanBody(String text) {
         if (text == null || text.isEmpty()) return "";
-        return text.replaceAll("\s+", " ").trim();
+        return text.replaceAll("\\s+", " ").trim();
     }
 
     /**
      * Recursively flatten the Reddit comments tree into a flat list.
-     * Each entry is a Map with keys matching the comment JSON structure from Reddit.
      */
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> collectCommentsFlattened(
@@ -327,12 +376,10 @@ public class RedditCrawlerService {
             } else {
                 comment.put("createdUtc", null);
             }
-            // parent post reference for display.
             comment.put("parentPostTitle", parentPost != null ? String.valueOf(parentPost.get("title")) : "");
             comment.put("id", data.getOrDefault("id", ""));
             flat.add(comment);
 
-            // Recurse into nested replies if present.
             Object repliesObj = data.get("replies");
             if (repliesObj instanceof Map<?, ?> repliesMap && !repliesMap.isEmpty()) {
                 List<Map<String, Object>> childNodes = (List<Map<String, Object>>) repliesMap.get("data");
@@ -344,7 +391,6 @@ public class RedditCrawlerService {
         return flat;
     }
 
-    /** Persist/update crawl job status to JPA for analytics queries. */
     @SuppressWarnings("unchecked")
     private void persistJobStatusToJpa(String jobId, String status, List<Map<String, Object>> results) {
         try {
@@ -374,8 +420,7 @@ public class RedditCrawlerService {
         }
     }
 
-
-    /** Get all crawl jobs from JPA (PostgreSQL) for the /api/crawler/jobs endpoint. */
+    @SuppressWarnings("unchecked")
     public List<Map<String, Object>> getAllJobsFromJpa() {
         return jobRepo.findAll(org.springframework.data.domain.Sort.by(
                 org.springframework.data.domain.Sort.Order.desc("startedAt")
@@ -395,11 +440,20 @@ public class RedditCrawlerService {
             .collect(java.util.stream.Collectors.toList());
     }
 
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getRotationSummary() {
+        if (rotationService == null) {
+            return Map.of("status", "not_configured");
+        }
+        return rotationService.rotationSummary();
+    }
+
     /** Access the config field via reflection (JPA lazy-load safe). */
     private String getConfigField(CrawlerJob job) {
         Object val = job.getConfig();
         return val != null ? String.valueOf(val) : "{}";
     }
+
     public static class PostDTO {
         public PostDTO() {}
 
@@ -411,17 +465,11 @@ public class RedditCrawlerService {
             dto.body = (String) postJson.getOrDefault("body", "");
             dto.author = (String) postJson.getOrDefault("author", "[deleted]");
             Object upvotesObj = postJson.get("upvotes");
-            if (upvotesObj instanceof Number n) {
-                dto.upvotes = n.intValue();
-            } else {
-                dto.upvotes = 0;
-            }
+            if (upvotesObj instanceof Number n) { dto.upvotes = n.intValue(); }
+            else { dto.upvotes = 0; }
             Object commentsObj = postJson.get("commentsCount");
-            if (commentsObj instanceof Number n) {
-                dto.commentsCount = n.intValue();
-            } else {
-                dto.commentsCount = 0;
-            }
+            if (commentsObj instanceof Number n) { dto.commentsCount = n.intValue(); }
+            else { dto.commentsCount = 0; }
             dto.createdUtc = Instant.ofEpochSecond(
                     Math.toIntExact((int) Double.parseDouble(postJson.getOrDefault("createdUtc", "0").toString())));
             dto.permalink = (String) postJson.getOrDefault("permalink", "");
@@ -433,9 +481,7 @@ public class RedditCrawlerService {
         public static List<PostDTO> fromResults(List<Map<String, Object>> results) {
             if (results == null) return java.util.List.of();
             var list = new ArrayList<PostDTO>();
-            for (Map<String, Object> r : results) {
-                list.addAll(from(r));
-            }
+            for (Map<String, Object> r : results) list.addAll(from(r));
             return list;
         }
 
@@ -448,16 +494,11 @@ public class RedditCrawlerService {
         public String permalink;
         public String subreddit;
     }
-    /** Utility: safely convert any object to a trimmed string. */
+
     private String asString(Object o) {
         return o != null ? String.valueOf(o).trim() : "";
     }
 
-// ──────────────────────────────────
-    // P1-3: PostgreSQL persistence for crawled content
-    // ──────────────────────────────────
-
-    /** Persist crawled posts to the PostgreSQL `posts` table. */
     @Transactional
     public void persistPostsToPostgres(String jobId, List<Map<String, Object>> rawPosts) {
         if (rawPosts == null || rawPosts.isEmpty()) return;
@@ -491,7 +532,6 @@ public class RedditCrawlerService {
         }
     }
 
-    /** Persist crawled comments to the PostgreSQL `comments` table. */
     @Transactional
     public void persistCommentsToPostgres(String jobId, List<Map<String, Object>> rawComments) {
         if (rawComments == null || rawComments.isEmpty()) return;
@@ -508,15 +548,11 @@ public class RedditCrawlerService {
                 try {
                     List<com.redditcrawler.api.model.Post> candidates = postRepo.findBySubreddit(subredditName);
                     for (com.redditcrawler.api.model.Post candidate : candidates) {
-                        if (candidate.getTitle().equals(postTitle)) {
-                            targetPost = candidate;
-                            break;
-                        }
+                        if (candidate.getTitle().equals(postTitle)) { targetPost = candidate; break; }
                     }
                 } catch (Exception e) {
                     log.warn("[P1-3] Could not find post for comment linking: {} on {}", postTitle, subredditName);
                 }
-
                 c.setPost(targetPost != null ? targetPost : new com.redditcrawler.api.model.Post());
                 c.setAuthor(asString(row.get("author")));
                 c.setBody(asString(row.getOrDefault("body", "")));

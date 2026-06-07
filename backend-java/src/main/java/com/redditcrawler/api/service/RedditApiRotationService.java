@@ -63,6 +63,26 @@ public class RedditApiRotationService {
     }
 
     /**
+     * Get the active API key WITHOUT advancing the round-robin index.
+     * Used by crawler to pick a key once per crawl session.
+     */
+    public RedditApiKeyConfig peekCurrentApiKey() {
+        List<RedditApiKeyConfig> activeKeys = getValidActiveKeys();
+        if (activeKeys.isEmpty()) {
+            return null;
+        }
+        int idx = Math.floorMod(rotationIndex.get(), activeKeys.size());
+        RedditApiKeyConfig key = activeKeys.get(idx);
+
+        if (needsTokenRefresh(key)) {
+            log.info("Token for alias '{}' expired — auto-refreshing", key.getAlias());
+            refreshToken(key);
+        }
+
+        return key;
+    }
+
+    /**
      * Get all valid, active API keys sorted by rotation order.
      */
     public List<RedditApiKeyConfig> getAllActiveKeys() {
@@ -80,172 +100,292 @@ public class RedditApiRotationService {
     }
 
     /**
-     * Check if a token needs refreshing (expires within next 5 minutes).
+     * Check if the access token is expired or will expire within 5 minutes.
      */
-    private boolean needsTokenRefresh(RedditApiKeyConfig key) {
-        if (key.getAccessToken() == null || key.getAccessToken().isEmpty()) {
-            return true;
-        }
-        LocalDateTime now = LocalDateTime.now();
-        // Consider a token expired if it's past expiry or will expire within 5 minutes
-        return !now.isBefore(key.getTokenExpiresAt().minusMinutes(5));
+    public boolean needsTokenRefresh(RedditApiKeyConfig key) {
+        if (key.getTokenExpiresAt() == null) return false;
+        LocalDateTime window = LocalDateTime.now().plusMinutes(5);
+        return key.getTokenExpiresAt().isBefore(window);
     }
 
     /**
-     * Rotate the active key to a specific index (for manual testing).
+     * Get the access token for a given key config.
+     * Returns null if the key has no refresh token (needs user OAuth flow).
      */
-    public void setRotationIndex(int idx) {
-        List<RedditApiKeyConfig> keys = getValidActiveKeys();
-        if (!keys.isEmpty()) {
-            rotationIndex.set(idx % keys.size());
-            log.info("Manually set rotation index to {}", idx);
+    public String getAccessTokenFor(RedditApiKeyConfig key, RestTemplate rt) {
+        if (key == null) return null;
+
+        // If we already have an access token and it's not expiring within 5 min, reuse it
+        if (!needsTokenRefresh(key)) {
+            log.debug("Reusing existing access token for alias '{}'", key.getAlias());
+            return key.getAccessToken();
         }
+
+        // Need to get a new token — use refresh flow or client_credentials
+        refreshToken(key);
+        return key.getAccessToken();
     }
 
     /**
-     * Add a new Reddit API key configuration.
+     * Add a new API key config.
      */
     @Transactional
     public RedditApiKeyConfig addApiKey(String clientId, String clientSecret, String alias) {
+        log.info("[P4-1] Adding new Reddit API key config with alias '{}'", alias);
+
+        RedditApiKeyConfig config = new RedditApiKeyConfig();
+        config.setClientId(clientId);
+        config.setClientSecret(clientSecret);
+        config.setAlias(alias != null && !alias.isEmpty() ? alias : ("key-" + System.currentTimeMillis()));
+        config.setActive(true);
+
+        // Determine rotation order
         int maxOrder = apiKeyRepo.findAllByOrderByRotationOrderAsc().stream()
                 .mapToInt(RedditApiKeyConfig::getRotationOrder)
                 .max()
                 .orElse(-1);
+        config.setRotationOrder(maxOrder + 1);
 
-        RedditApiKeyConfig config = new RedditApiKeyConfig(clientId, clientSecret, maxOrder + 1, true, alias);
-        log.info("Added new Reddit API key config with alias '{}', rotation order {}", alias, config.getRotationOrder());
         return apiKeyRepo.save(config);
     }
 
     /**
-     * Remove/delete an API key configuration.
+     * Remove an API key config by ID.
      */
     @Transactional
-    public void removeApiKey(Long id) {
-        apiKeyRepo.deleteById(id);
-        log.info("Removed Reddit API key config with ID {}", id);
-    }
+    public RedditApiKeyConfig removeApiKey(Long id) {
+        log.info("[P4-1] Removing Reddit API key config: id={}", id);
+        Optional<RedditApiKeyConfig> existing = apiKeyRepo.findById(id);
 
-    /**
-     * Get all configured keys (for management UI).
-     */
-    public List<RedditApiKeyConfig> getAllKeys() {
-        return apiKeyRepo.findAllByOrderByRotationOrderAsc();
-    }
-
-    /**
-     * Authenticate with Reddit using this key config and store access token.
-     */
-    @Transactional
-    public boolean refreshToken(RedditApiKeyConfig config) {
-        try {
-            String credentials = config.getClientId() + ":" + config.getClientSecret();
-            String encoded = Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
-            headers.set("Authorization", "Basic " + encoded);
-
-            String tokenUrl = "https://www.reddit.com/api/v1/access_token";
-            UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromHttpUrl(tokenUrl)
-                    .queryParam("grant_type", "client_credentials");
-
-            HttpEntity<Void> request = new HttpEntity<>(headers);
-
-            ResponseEntity<String> response = restTemplate.exchange(
-                    uriBuilder.build().toUri(), HttpMethod.POST, request, String.class);
-
-            if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-                Map<String, Object> tokenData = parseJsonResponse(response.getBody());
-                String accessToken = (String) tokenData.get("access_token");
-                Integer expiresIn = (Integer) tokenData.get("expires_in");
-                String refreshTokenStr = (String) tokenData.get("refresh_token");
-
-                LocalDateTime expiresAt;
-                if (expiresIn != null && expiresIn > 0) {
-                    expiresAt = LocalDateTime.now().plusSeconds(expiresIn);
-                } else {
-                    expiresAt = LocalDateTime.now().plusHours(1); // default
-                }
-
-                apiKeyRepo.updateTokens(config.getId(), accessToken, refreshTokenStr, expiresAt);
-
-                log.info("Successfully refreshed token for alias '{}', expires at {}", config.getAlias(), expiresAt);
-                return true;
-            } else {
-                log.error("Failed to refresh token for alias '': got status {}", config.getAlias(), response.getStatusCode());
-                return false;
-            }
-        } catch (Exception e) {
-            log.error("Error refreshing Reddit API token for alias '{}': {}", config.getAlias(), e.getMessage());
-            return false;
+        if (existing.isPresent()) {
+            // Deactivate rather than physically delete to maintain referential integrity
+            existing.get().setActive(false);
+            return apiKeyRepo.save(existing.get());
         }
+
+        log.warn("[P4-1] API key config not found for deletion: id={}", id);
+        throw new NoSuchElementException("API key config with id " + id + " not found");
     }
 
     /**
-     * Get a fresh access token string for the current rotation index.
-     */
-    public String getCurrentAccessToken() {
-        RedditApiKeyConfig key = getCurrentApiKey();
-        if (key == null || key.getAccessToken() == null) {
-            // Try to refresh all keys first, then pick one
-            refreshTokenAllKeys();
-            key = getCurrentApiKey();
-        }
-        return key != null ? key.getAccessToken() : null;
-    }
-
-    /**
-     * Attempt to refresh tokens for all non-expired keys.
+     * Refresh tokens for all active keys that need it.
      */
     @Transactional
     public void refreshTokenAllKeys() {
-        List<RedditApiKeyConfig> keys = apiKeyRepo.findByActiveTrueOrderByRotationOrderAsc();
-        log.info("Attempting token refresh for {} API configs", keys.size());
+        log.info("[P4-1] Refreshing OAuth tokens for all valid active Reddit API key configs...");
 
-        LocalDateTime now = LocalDateTime.now().plusMinutes(5);
-        List<Long> expiredIds = apiKeyRepo.findInvalidTokens(now).stream()
-                .map(RedditApiKeyConfig::getId)
-                .toList();
+        List<RedditApiKeyConfig> keys = apiKeyRepo.findByActiveTrueOrderByRotationOrderAsc();
+        LocalDateTime now = LocalDateTime.now();
 
         int refreshed = 0;
-        for (RedditApiKeyConfig key : keys) {
-            if (expiredIds.contains(key.getId()) || needsTokenRefresh(key)) {
-                boolean result = refreshToken(key);
-                if (!result) {
-                    // Mark this config as inactive so it's not used for new requests
-                    apiKeyRepo.setActive(key.getId(), false);
-                    log.warn("Disabled API key config '{}' after refresh failure", key.getAlias());
-                } else {
+        int failed = 0;
+
+        for (RedditApiKeyConfig config : keys) {
+            // Try refresh if we have a refresh token
+            if (config.getRefreshToken() != null && !config.getRefreshToken().isEmpty()) {
+                if (refreshTokenByAlias(config) != null) {
                     refreshed++;
+                } else {
+                    failed++;
                 }
             }
         }
 
-        log.info("Token refresh complete: {} succeeded, {} skipped/disabled", refreshed, keys.size() - refreshed);
+        log.info("[P4-1] Token refresh summary — active keys: {}, refreshed: {}, failed: {}", 
+                keys.size(), refreshed, failed);
     }
 
     /**
-     * Simple JSON parser for the token response.
+     * Return the number of valid active API key configurations.
      */
-    private Map<String, Object> parseJsonResponse(String json) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        String trimmed = json.trim().replaceAll("\\s+", "");
-        // Very basic extractor - just looks for "key":value patterns
-        String[] pairs = trimmed.split(",");
-        for (String pair : pairs) {
-            String[] kv = pair.split(":", 2);
-            if (kv.length == 2) {
-                String key = kv[0].replaceAll("\"", "").trim();
-                String value = kv[1].replaceAll("[{}]", "").trim().replaceAll("\"", "");
-                // Try to parse as int or long
+    @Transactional(readOnly = true)
+    public int getActiveKeyCount() {
+        List<RedditApiKeyConfig> activeKeys = getValidActiveKeys();
+        return Math.max(activeKeys.size(), 0);
+    }
+
+    /**
+     * Get a summary of all active keys for monitoring.
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Object> rotationSummary() {
+        List<RedditApiKeyConfig> keys = getAllActiveKeys();
+        int count = getActiveKeyCount();
+        LocalDateTime now = LocalDateTime.now();
+
+        return Map.of(
+            "activeKeys", keys.size(),
+            "validTokens", count,
+            "keys", keys.stream().map(k -> {
+                // Check expiry without modifying state
+                boolean expiringSoon = (k.getTokenExpiresAt() != null) && 
+                                       k.getTokenExpiresAt().isBefore(now.plusMinutes(5));
+                return Map.<String, Object>of(
+                    "alias", k.getAlias(),
+                    "rotationOrder", k.getRotationOrder(),
+                    "active", k.isActive(),
+                    "accessTokenPresent", k.getAccessToken() != null && !k.getAccessToken().isEmpty(),
+                    "refreshTokenPresent", k.getRefreshToken() != null && !k.getRefreshToken().isEmpty(),
+                    "expiresAt", k.getTokenExpiresAt(),
+                    "expiringSoon", expiringSoon
+                );
+            }).toList()
+        );
+    }
+
+    /** Refresh all keys including invalid ones */
+    @Transactional(readOnly = true)
+    public void refreshAllTokensIncludingInvalid(RedditApiKeyRepository repo, RestTemplate rt) {
+        log.info("[P4-1] Refreshing tokens for ALL configured Reddit API key configs (including invalid ones)...");
+
+        List<RedditApiKeyConfig> allKeys = apiKeyRepo.findAllByOrderByRotationOrderAsc();
+        int successCount = 0;
+        int failCount = 0;
+
+        for (RedditApiKeyConfig config : allKeys) {
+            if (refreshToken(config)) {
+                successCount++;
+            } else {
+                failCount++;
                 try {
-                    result.put(key, Long.parseLong(value));
-                } catch (NumberFormatException ex) {
-                    result.put(key, value);
+                    log.warn("[P4-1] Token refresh failed for alias '{}'. Deactivating.", config.getAlias());
+                    repo.setActive(config.getId(), false);
+                } catch (Exception e) {
+                    log.warn("[P4-1] Could not deactivate key: {}", e.getMessage());
                 }
             }
         }
-        return result;
+
+        log.info("[P4-1] Batch refresh done — OK: {}, FAIL: {}", successCount, failCount);
+    }
+
+    /** Refresh a single key's tokens via OAuth2 client_credentials or refresh_token grant */
+    private boolean refreshToken(RedditApiKeyConfig config) {
+        try {
+            String credBase64 = Base64.getEncoder()
+                    .encodeToString((config.getClientId() + ":" + config.getClientSecret())
+                            .getBytes(StandardCharsets.ISO_8859_1));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", "Basic " + credBase64);
+            headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+            Map<String, String> body = new LinkedHashMap<>();
+            if (config.getRefreshToken() != null && !config.getRefreshToken().isEmpty()) {
+                // Try refresh token flow first
+                body.put("grant_type", "refresh_token");
+                body.put("refresh_token", config.getRefreshToken());
+            } else {
+                body.put("grant_type", "client_credentials");
+            }
+
+            HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, headers);
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                    "https://www.reddit.com/api/v1/access_token", HttpMethod.POST, entity, Map.class);
+
+            if (resp.getBody() != null) {
+                String accessToken = (String) resp.getBody().get("access_token");
+                int expiresIn = ((Number) resp.getBody().getOrDefault("expires_in", 3600)).intValue();
+                String refreshTokenStr = (String) resp.getBody().getOrDefault("refresh_token", config.getRefreshToken());
+                LocalDateTime expiresAt = LocalDateTime.now()
+                        .plusSeconds(expiresIn > 0 ? expiresIn : 3600);
+
+                apiKeyRepo.updateTokens(config.getId(), accessToken, refreshTokenStr, expiresAt);
+                log.info("[P4-1] Token refreshed for alias '{}' (expires in {}s)", config.getAlias(), expiresIn);
+                return true;
+            } else {
+                log.error("[P4-1] Token refresh returned empty body for alias '{}'", config.getAlias());
+                return false;
+            }
+        } catch (Exception e) {
+            log.error("[P4-1] Token refresh failed for alias '" + config.getAlias() + "': " + e.getMessage(), e);
+            // Try client_credentials as fallback if refresh token failed
+            try {
+                String credBase64 = Base64.getEncoder()
+                        .encodeToString((config.getClientId() + ":" + config.getClientSecret())
+                                .getBytes(StandardCharsets.ISO_8859_1));
+
+                HttpHeaders headers = new HttpHeaders();
+                headers.set("Authorization", "Basic " + credBase64);
+                headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+                Map<String, String> body = new LinkedHashMap<>();
+                body.put("grant_type", "client_credentials");
+
+                HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, headers);
+                ResponseEntity<Map> resp = restTemplate.exchange(
+                        "https://www.reddit.com/api/v1/access_token", HttpMethod.POST, entity, Map.class);
+
+                if (resp.getBody() != null) {
+                    String accessToken = (String) resp.getBody().get("access_token");
+                    int expiresIn = ((Number) resp.getBody().getOrDefault("expires_in", 3600)).intValue();
+                    LocalDateTime expiresAt = LocalDateTime.now()
+                            .plusSeconds(expiresIn > 0 ? expiresIn : 3600);
+
+                    apiKeyRepo.updateTokens(config.getId(), accessToken, null, expiresAt);
+                    log.info("[P4-1] Token refreshed via client_credentials for alias '{}'", config.getAlias());
+                    return true;
+                } else {
+                    return false;
+                }
+            } catch (Exception e2) {
+                log.error("[P4-1] Both refresh and client_credentials failed for alias '" + config.getAlias() + "': " + e2.getMessage(), e2);
+                return false;
+            }
+        }
+    }
+
+    /** Refresh tokens using the Reddit API via OAuth2. */
+    private ResponseEntity<Map> refreshTokenByAlias(RedditApiKeyConfig config) {
+        try {
+            if (config.getRefreshToken() == null || config.getRefreshToken().isEmpty()) {
+                return refreshTokenViaClientCredentials(config);
+            }
+
+            String credBase64 = Base64.getEncoder().encodeToString(
+                    (config.getClientId() + ":" + config.getClientSecret()).getBytes(StandardCharsets.ISO_8859_1));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", "Basic " + credBase64);
+            headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+            Map<String, String> body = new LinkedHashMap<>();
+            body.put("grant_type", "refresh_token");
+            body.put("refresh_token", config.getRefreshToken());
+
+            HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, headers);
+            return restTemplate.exchange(
+                    "https://www.reddit.com/api/v1/access_token", HttpMethod.POST, entity, Map.class);
+        } catch (Exception e) {
+            log.warn("[P4-1] Token refresh via alias '{}' failed — trying client_credentials: {}", 
+                    config.getAlias(), e.getMessage());
+            return refreshTokenViaClientCredentials(config);
+        }
+    }
+
+    private ResponseEntity<Map> refreshTokenViaClientCredentials(RedditApiKeyConfig config) {
+        try {
+            String credBase64 = Base64.getEncoder().encodeToString(
+                    (config.getClientId() + ":" + config.getClientSecret()).getBytes(StandardCharsets.ISO_8859_1));
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", "Basic " + credBase64);
+            headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+            Map<String, String> body = new LinkedHashMap<>();
+            body.put("grant_type", "client_credentials");
+
+            HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, headers);
+            return restTemplate.exchange(
+                    "https://www.reddit.com/api/v1/access_token", HttpMethod.POST, entity, Map.class);
+        } catch (Exception e) {
+            log.error("[P4-1] client_credentials refresh failed for alias '" + config.getAlias() + "': " + e.getMessage(), e);
+            throw new RuntimeException("client_credentials refresh failed: " + e.getMessage());
+        }
+    }
+
+    /** Get keys sorted by rotation order. */
+    public List<RedditApiKeyConfig> getAllKeys() {
+        return apiKeyRepo.findAllByOrderByRotationOrderAsc();
     }
 }
