@@ -32,11 +32,21 @@ Reddit Crawler — Autonomous Dev Factory Backlog
 - [x] **#P2-3**: Analytics deep-dive page (/analytics) - keyword distribution + trends
   - DONE: Full analytics page with recharts LineChart, BarChart, PieChart; useAnalytics hook polling backend
 
-### P3 — Polish (next cycle)
+### P3 — Polish ✅ ALL COMPLETE
 - [x] **#P3-1**: Backend integration test suite (WebMvcTest + MockRestServiceServer)
-  - FIXED: Wrote CrawlerIntegrationTest, AnalyticsIntegrationTest, HealthIntegrationTest with WebMvcTest slice
+  - FIXED: Wrote CrawlerIntegrationTest, AnalyticsIntegrationTest, HealthIntegrationTest with WebMvcTest slices
 - [x] **#P3-2**: Frontend error boundaries + loading skeletons for all panels
-  - FIXED: Wrapped all pages in PageErrorBoundary, added PanelSkeleton/GridSkeleton/TableSkeleton loading states to dashboard, controls, analytics, data, settings
-- [ ] **#P4-1**: Multi-config Reddit API key rotation in task queue
-- [ ] **#P4-2**: Full integration: frontend → real backend data (remove all mock/stub)
-- [ ] **#P4-3**: Flyway migration scripts replacing ddl-auto=update for production
+  - FIXED: Wrapped all pages in PageErrorBoundary, added PanelSkeleton/GridSkeleton/TableSkeleton loading states
+
+### P4 — Rotation + Production Readiness ✅ ALL COMPLETE (this tick)
+- [x] **#P4-1**: Multi-config Reddit API key rotation in task queue
+  - DONE: RedditApiRotationService.java (round-robin + auto token refresh), ApiKeysManagementController.java (CRUD), integrated into AsyncCrawlerRunner health-sweep and RedditCrawlerService.startCrawl
+- [x] **#P4-2**: Full integration: frontend → real backend data (remove all mock/stub)
+  - DONE: All useAnalytics, useStats, useJobs hooks fetch REAL endpoint; no generateMock* functions remain in production code; verified build = 0 TS errors
+- [x] **#P4-3**: Flyway migration scripts replacing ddl-auto=update for production
+  - DONE: V1–V11 migrations deployed; spring.jpa.hibernate.ddl-auto=none; flyway.enabled=true; migration table auto-baselined
+
+### P5 — Upcoming (next tick)
+- [ ] **#P5-1**: Rate-limit aware scheduler (delay between subreddit crawls to avoid 429s)
+- [ ] **#P5-2**: Export data page (/data) with CSV/JSON download and pagination UI polish
+- [ ] **#P5-3**: Settings page /settings — persist LLM provider, proxy settings, crawler defaults
