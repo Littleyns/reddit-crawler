@@ -5,7 +5,7 @@ const BACKEND_URL = process.env.BACKEND_API_URL || "http://localhost:8080/api";
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   // Extract relative path after /api/analysis — e.g. "/trends", "/sentiment"
-  const relPath = url.pathname.replace(/^\/api\/analysis/, "");
+  const relPath = "/analytics/daily-trend";
 
   try {
     const targetUrl = `${BACKEND_URL}${relPath}${url.search}`;

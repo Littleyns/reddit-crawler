@@ -50,3 +50,11 @@ Reddit Crawler — Autonomous Dev Factory Backlog
 - [ ] **#P5-1**: Rate-limit aware scheduler (delay between subreddit crawls to avoid 429s)
 - [ ] **#P5-2**: Export data page (/data) with CSV/JSON download and pagination UI polish
 - [ ] **#P5-3**: Settings page /settings — persist LLM provider, proxy settings, crawler defaults
+### P6 — Upcoming (planning)
+- [ ] **#P6-1**: Automated test scaffolding — add integration test harness for frontend hooks (useCrawlerStatus, useAnalytics, useStats)
+- [ ] **#P6-2**: Logging and monitoring (structured JSON logs, log aggregation config, alerting on failure patterns)
+
+### 🔵 Status Check | 2026-06-07T17:24Z
+- **Deploy:** ✅ #110 finished (commit 210dacd — remove nginx mount) — all 5 containers running healthy
+- **Kanban:** All previous tasks archived/done → P5-1 rate-limiting created as next priority task
+
