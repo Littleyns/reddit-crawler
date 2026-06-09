@@ -188,7 +188,7 @@ function InsightsTable(props: { insights: InsightItem[] | [] }) {
 }
 
 export default function AnalyticsPage() {
-  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  // Removed hardcoded localhost — all fetches now use relative /api/... paths
 
   const { data: analytics, isLoading: loading } = useQuery({
     queryKey: ["analytics-real-snapshot"],
@@ -204,14 +204,14 @@ export default function AnalyticsPage() {
   const { data: subreddits = [] } = useQuery({
     queryKey: ["analytics-subreddits"],
     queryFn: async () => {
-      try { const res = await fetch(BACKEND + "/api/data/subreddits"); return res.ok ? res.json() : []; } catch { return []; }
+      try { const res = await fetch("/api/data/subreddits"); return res.ok ? res.json() : []; } catch { return []; }
     }, staleTime: 120_000,
   });
 
   const { data: keywords = [] } = useQuery({
     queryKey: ["analytics-keywords"],
     queryFn: async () => {
-      try { const res = await fetch(BACKEND + "/api/analysis/keywords?topN=30"); return res.ok ? res.json() : []; } catch { return []; }
+      try { const res = await fetch("/api/analysis/keywords?topN=30"); return res.ok ? res.json() : []; } catch { return []; }
     }, staleTime: 120_000,
   });
 
@@ -219,7 +219,7 @@ export default function AnalyticsPage() {
     queryKey: ["analytics-sentiment-dist"],
     queryFn: async () => {
       try {
-        const res = await fetch(BACKEND + "/api/analysis/sentiment");
+        const res = await fetch("/api/analysis/sentiment");
         if (!res.ok) return (analytics as any)?.sentimentDistribution || [];
         const items: Array<{ sentiment: string }> = await res.json();
         const agg: Record<string, number> = { positive: 0, neutral: 0, negative: 0 };
@@ -239,8 +239,8 @@ export default function AnalyticsPage() {
     queryFn: async () => {
       try {
         const [res1, res2] = await Promise.all([
-          fetch(BACKEND + "/api/analysis/insights").catch(() => null),
-          fetch(BACKEND + "/api/analysis/ideas").catch(() => null),
+          fetch("/api/analysis/insights").catch(() => null),
+          fetch("/api/analysis/ideas").catch(() => null),
         ]);
         const arr1: Array<{ title: string; subtitle: string; category: string }> = res1?.ok ? await res1.json() : [];
         const arr2: Array<{ title: string; subtitle: string; category: string }> = res2?.ok ? await res2.json() : [];

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { CrawlConfig } from "@/lib/types";
 
-const BACKEND = process.env.BACKEND_URL || "http://localhost:8080";
+const BACKEND = process.env.BACKEND_URL || "http://backend:8080";
 
 export async function POST(request: Request) {
   const config = (await request.json()) as CrawlConfig;

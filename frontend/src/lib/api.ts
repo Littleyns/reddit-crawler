@@ -107,42 +107,37 @@ export async function login(payload: LoginPayload): Promise<LoginResponse> {
   return res.data;
 }
 
-// ──────────────── P4-2: Real crawl jobs endpoint (dashboard queue) ─────────
+// ──────────────── P4-2: Real crawl jobs endpoint (dashboard queue) — ALL RELATIVE URIS ─────────
 export async function fetchCrawlerJobs(): Promise<CrawlJobBackend[]> {
-  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-  const res = await fetch(`${BACKEND}/api/crawler/jobs`, { cache: "no-store" });
+  const res = await fetch('/api/crawler/jobs', { cache: "no-store" });
   if (!res.ok) return [];
   const data = await res.json();
   return Array.isArray(data) ? data : (data.jobs ?? []);
 }
 
-// ── P4-1 / P4-2: Real analytics endpoint on backend (used by useAnalyticsReal in hooks) — no mock ──
+// ── P4-1 / P4-2: Real analytics endpoint on backend — all relative paths ──
 export async function fetchAnalytics(): Promise<Record<string, unknown>> {
-  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-  const res = await fetch(`${BACKEND}/api/analytics`, { cache: "no-store" });
+  const res = await fetch('/api/analytics', { cache: "no-store" });
   if (!res.ok) return {};
   return (await res.json()) ?? {};
 }
 
 export async function fetchSubredditStats(): Promise<unknown[]> {
-  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-  const res = await fetch(`${BACKEND}/api/data/subreddits`, { cache: "no-store" });
+  const res = await fetch('/api/data/subreddits', { cache: "no-store" });
   if (!res.ok) return [];
   return (await res.json()) ?? [];
 }
 
-// P4-1 / P4-2: API keys management — real backend CRUD via /api/keys
+// P4-1 / P4-2: API keys management — all relative paths
 export async function fetchApiKeys(): Promise<unknown[]> {
-  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-  const res = await fetch(`${BACKEND}/api/keys`, { cache: "no-store" });
+  const res = await fetch('/api/keys', { cache: "no-store" });
   if (!res.ok) return [];
   const data = await res.json();
   return Array.isArray(data) ? data : [];
 }
 
 export async function addApiKey(clientId: string, clientSecret: string, alias?: string): Promise<unknown> {
-  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-  const res = await fetch(`${BACKEND}/api/keys`, {
+  const res = await fetch('/api/keys', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ clientId, clientSecret, alias }),
@@ -152,21 +147,18 @@ export async function addApiKey(clientId: string, clientSecret: string, alias?: 
 }
 
 export async function removeApiKey(id: number): Promise<void> {
-  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-  const res = await fetch(`${BACKEND}/api/keys/${id}`, { method: 'DELETE' });
+  const res = await fetch(`/api/keys/${id}`, { method: 'DELETE' });
   if (!res.ok) throw new Error(`removeApiKey failed (${res.status})`);
 }
 
 export async function refreshAllApiTokens(): Promise<{ message: string }> {
-  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-  const res = await fetch(`${BACKEND}/api/keys/refresh`, { method: 'POST' });
+  const res = await fetch('/api/keys/refresh', { method: 'POST' });
   if (!res.ok) throw new Error(`refreshAllApiTokens failed (${res.status})`);
   return res.json();
 }
 
 export async function fetchActiveSubreddits(): Promise<unknown> {
-  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-  const res = await fetch(`${BACKEND}/data/subreddits`, { cache: 'no-store' });
+  const res = await fetch('/data/subreddits', { cache: 'no-store' });
   if (!res.ok) throw new Error('fetchActiveSubreddits failed');
   return res.json();
 }
@@ -184,10 +176,9 @@ export async function filterPostsByKeywords(keywords: string[], limit = 50): Pro
   return { ...all, items: filtered, total: filtered.length };
 }
 
-// P4-2: Export crawl results (raw post/comment data dump) in CSV/JSON format
+// P4-2: Export crawl results — all relative paths
 export async function exportCrawlResults(format: string = "json"): Promise<Blob> {
-  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-  const res = await fetch(`${BACKEND}/api/export?type=${format}`, { cache: 'no-store' });
+  const res = await fetch(`/api/export?type=${format}`, { cache: 'no-store' });
   if (!res.ok) throw new Error(`exportCrawlResults failed (${res.status})`);
   return res.blob();
 }

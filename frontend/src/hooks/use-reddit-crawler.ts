@@ -103,9 +103,9 @@ export function useJobs() {
 }
 
 async function fetchJobs(): Promise<Record<string, unknown>[]> {
-  const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  // All relative to /api/ — passed through Next.js proxy to backend
   try {
-    const res = await fetch(BACKEND + "/api/crawler/jobs", { cache: "no-store" });
+    const res = await fetch("/api/crawler/jobs", { cache: "no-store" });
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data) ? data : (data.jobs ?? []);
@@ -114,16 +114,15 @@ async function fetchJobs(): Promise<Record<string, unknown>[]> {
   }
 }
 
-// P4-2: Real analytics from backend API routes
+// P4-2: Real analytics — all relative paths to /api/
 export function useAnalyticsReal() {
   return useQuery({
     queryKey: ["analytics-real"],
     queryFn: async () => {
-      const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
       try {
         const [resAnalytics, resSubs] = await Promise.all([
-          fetch(BACKEND + "/api/analytics", { cache: "no-store" }),
-          fetch(BACKEND + "/api/data/subreddits", { cache: "no-store" }),
+          fetch("/api/analytics", { cache: "no-store" }),
+          fetch("/api/data/subreddits", { cache: "no-store" }),
         ]);
         let analyticsData: Record<string, unknown> = {};
         let subredditData: unknown[] = [];

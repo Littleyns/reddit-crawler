@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const BACKEND_URL = process.env.BACKEND_API_URL || "http://localhost:8080/api";
-
+const BACKEND_URL = process.env.BACKEND_API_URL || "http://backend:8080/api";
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   // Extract relative path after /api/analysis — e.g. "/trends", "/sentiment"

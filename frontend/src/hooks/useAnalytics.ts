@@ -46,8 +46,6 @@ export interface AnalysisData {
 // Helpers ---------------------------------------------------------------
 // ---------------------------------------------------------------------------
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-
 async function ping(url: string): Promise<boolean> {
   try {
     const res = await fetch(url, { method: "GET", cache: "no-store" });
@@ -60,6 +58,7 @@ async function ping(url: string): Promise<boolean> {
 // ---------------------------------------------------------------------------
 // Public hook ----------------------------------------------------------
 // P4-2: NO MOCK DATA — always hits real backend. Sets loading/error when unreachable.
+// All fetches use relative /api/... paths so they are proxied through Next.js to the backend server.
 // ---------------------------------------------------------------------------
 
 export function useAnalytics() {
@@ -71,8 +70,9 @@ export function useAnalytics() {
 
   async function fetchAnalysisSnapshot() {
     try {
-      const baseUrl = `${API_BASE}/api/analysis/snapshot`;
-      const reachable = await ping(`${API_BASE}/api/analysis?health=true`);
+      // All relative to /api/ — Next.js rewrites proxy these to the backend server
+      const baseUrl = "/api/analysis/snapshot";
+      const reachable = await ping("/api/analysis?health=true");
       setApiReachable(reachable);
 
       if (reachable) {
@@ -80,10 +80,10 @@ export function useAnalytics() {
         const [snapshotRes, sentimentRes, keywordsRes, insightsRes] =
           await Promise.all([
             fetch(baseUrl).then((r) => r.ok ? r.json() : null),
-            fetch(`${API_BASE}/api/analysis/sentiment`).then((r) => r.ok ? r.json() : []),
-            fetch(`${API_BASE}/api/analysis/keywords`)
+            fetch("/api/analysis/sentiment").then((r) => r.ok ? r.json() : []),
+            fetch("/api/analysis/keywords")
               .then((r) => r.ok ? r.json() : []),
-            fetch(`${API_BASE}/api/analysis/insights`)
+            fetch("/api/analysis/insights")
               .then((r) => r.ok ? r.json() : []),
           ]);
 
