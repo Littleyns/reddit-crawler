@@ -1,3 +1,0 @@
--- V10: Clean up any leftover duplicate table from Hibernate create-drop that might have clashed
--- The MetricsSnapshot entity creates a metrics_snapshot table via HQL; if Flyway runs first, skip here
--- This is a no-op migration used to ensure the entity-table lifecycle conflict is resolved at runtime.

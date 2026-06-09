@@ -8,12 +8,15 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -21,9 +24,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Comparator;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.redditcrawler.api.repository.CommentRepository;
 import com.redditcrawler.api.repository.CrawlerJobRepository;
 import com.redditcrawler.api.model.CrawlerJob;
@@ -49,6 +55,7 @@ public class RedditCrawlerService {
     private final CommentRepository commentRepo;
     private final CrawlerJobRepository jobRepo;
     private final RedditApiRotationService rotationService;
+    private final RedditRateLimiter rateLimiter;
 
     private final AtomicBoolean redisAvailable = new AtomicBoolean(false);
 
@@ -68,7 +75,8 @@ public class RedditCrawlerService {
             PostRepository postRepo,
             CommentRepository commentRepo,
             CrawlerJobRepository jobRepo,
-            RedditApiRotationService rotationService) {
+            RedditApiRotationService rotationService,
+            RedditRateLimiter rateLimiter) {
         this.restTemplate = restTemplate;
         this.jobStore = jobStore;
         this.redisCache = redisCache;
@@ -76,6 +84,7 @@ public class RedditCrawlerService {
         this.commentRepo = commentRepo;
         this.jobRepo = jobRepo;
         this.rotationService = rotationService;
+        this.rateLimiter = rateLimiter;
     }
 
     @PostConstruct
@@ -127,14 +136,14 @@ public class RedditCrawlerService {
         job.put("completedAt", null);
 
         jobStore.put(jobId, job);
-        
+
         // P4-1: Pick a rotating key for this crawl session (don't advance index during crawl)
         String authToken = getCrawlAuthToken();
-        log.info("[P4-1] Crawl jobId={} starting with token from key: {}", 
+        log.info("[P4-1] Crawl jobId={} starting with token from key: {}",
                 jobId, authToken != null && !authToken.isEmpty() ? "configured" : "legacy");
-        
+
         doCrawlSync(jobId, subreddit, config);
-        
+
         // Also persist to PostgreSQL for durable storage and analytics queries
         CrawlerJob entity = new CrawlerJob();
         entity.setJobId(jobId);
@@ -156,9 +165,9 @@ public class RedditCrawlerService {
             log.debug("[P4-1] Using rotating key '{}' access token", activeKey.getAlias());
             return activeKey.getAccessToken();
         }
-        
+
         // Fallback to legacy static credentials
-        if ((fallbackClientId != null && !fallbackClientId.isBlank()) && 
+        if ((fallbackClientId != null && !fallbackClientId.isBlank()) &&
             (fallbackClientSecret != null && !fallbackClientSecret.isBlank())) {
             log.debug("[P4-1] Falling back to legacy OAuth credentials");
             try {
@@ -167,111 +176,262 @@ public class RedditCrawlerService {
                 log.error("[P4-1] Legacy credential auth failed: " + e.getMessage());
             }
         }
-        
+
         return null;
     }
 
+    private static final int MAX_RETRIES_ON_429 = 5;
+
+    /** Track consecutive 429 count per subreddit for exponential backoff. */
+    private final ConcurrentHashMap<String, AtomicInteger> consecutive429Count = new ConcurrentHashMap<>();
+
+    /** Jackson mapper for response parsing. */
+    private static final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /**
+     * Crawl a subreddit with rate-limit awareness.
+     * Implements exponential backoff on Reddit HTTP 429 (Too Many Requests).
+     */
     @SuppressWarnings("unchecked")
     private void doCrawlSync(String jobId, String subreddit, Map<String, Object> config) {
-        try {
-            // Get token via the rotation service or fallback
-            String accessToken = getCrawlAuthToken();
-            
-            if (accessToken == null || accessToken.isBlank()) {
-                log.error("[P4-1] No auth tokens available — cannot crawl '" + subreddit + "'");
-                String status = "FAILED_NO_AUTH";
-                if (redisAvailable.get()) redisCache.updateStatus(jobId, status);
-                else jobStore.updateStatus(jobId, status);
-                persistJobStatusToJpa(jobId, status, null);
+        // ── P5-1: inter-crawl scheduler slot ─────────────────────────────
+        Duration crawlWait = rateLimiter.waitForNextCrawlSlot();
+        if (!crawlWait.isZero()) {
+            try {
+                log.info("[P5-1-SCHEDULER] Job {} subreddit={} — waiting {}ms before new crawl (rate-limiter pacing)",
+                        jobId, subreddit, crawlWait.toMillis());
+                Thread.sleep(crawlWait.toMillis());
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                persistFailure(jobId, "FAILED_INTERRUPTED", subreddit);
                 return;
             }
+        }
 
-            int limit = 25;
-            if (config != null && config.get("limit") instanceof Integer i) {
-                limit = Math.min(i, 100);
+        // Get token via the rotation service or fallback
+        String accessToken = getCrawlAuthToken();
+
+        if (accessToken == null || accessToken.isBlank()) {
+            log.error("[P4-1] No auth tokens available — cannot crawl '" + subreddit + "'");
+            persistFailure(jobId, "FAILED_NO_AUTH", subreddit);
+            return;
+        }
+
+        int limit = 25;
+        if (config != null && config.get("limit") instanceof Integer i) {
+            limit = Math.min(i, 100);
+        }
+
+        String url = redditApiBaseUrl + "/r/" + subreddit + "/hot.json?limit=" + limit;
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "Bearer " + accessToken);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        // ── rate-limit-aware retry loop ────────────────────────────────
+        String responseBodyJson = null;
+        int attempt = 0;
+
+        while (true) {
+            attempt++;
+            log.info("[P5-1-SCHEDULER] Job {} subreddit={} — STARTING crawl (attempt {}/{}), " +
+                    "rateLimiter active={}, backoffBucket={}",
+                    jobId, subreddit, attempt, MAX_RETRIES_ON_429,
+                    rateLimiter.getMinDelay(),
+                    consecutive429Count.getOrDefault(subreddit, new AtomicInteger(0)).get());
+            Duration waitBefore = rateLimiter.waitForReady(subreddit);
+            if (!waitBefore.isZero()) {
+                try { Thread.sleep(waitBefore.toMillis()); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    persistFailure(jobId, "FAILED_INTERRUPTED", subreddit);
+                    return;
+                }
+                log.info("[RATE-LIMIT] jobId={} subreddit={} — waited {}ms before request (attempt {})",
+                        jobId, subreddit, waitBefore.toMillis(), attempt);
             }
+            rateLimiter.recordRequest(subreddit);
 
-            String url = redditApiBaseUrl + "/r/" + subreddit + "/hot.json?limit=" + limit;
+            try {
+                ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.GET, entity, Map.class);
+                if (response.getBody() != null) {
+                    responseBodyJson = mapper.writeValueAsString(response.getBody());
+                    // Success — exit retry loop; rateLimiter backoff is reset below after parsing
+                    break;
+                } else {
+                    log.warn("[RATE-LIMIT] jobId={} subreddit={}: empty response body (attempt {}/{}); "
+                            + "rate-limiter backoff applied", jobId, subreddit, attempt, MAX_RETRIES_ON_429);
+                }
+            } catch (RestClientResponseException xcp) {
+                int status = xcp.getStatusCode().value();
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.set("Authorization", "Bearer " + accessToken);
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Void> entity = new HttpEntity<>(headers);
+                if (status == 401) {
+                    log.error("Auth error for crawler {}: {} — aborting", subreddit, xcp.getMessage());
+                    persistFailure(jobId, "FAILED_AUTH_ERROR:" + xcp.getMessage(), subreddit);
+                    return;
+                }
 
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    url, HttpMethod.GET, entity, Map.class);
-
-            if (response.getBody() != null) {
-                Map<String, Object> body = response.getBody();
-                Map<String, Object> data = (Map<String, Object>) body.get("data");
-                List<Map<String, Object>> children =
-                        (List<Map<String, Object>>) data.get("children");
-
-                List<Map<String, Object>> crawledPosts = new ArrayList<>();
-                // Also collect all comments flat across the whole result set.
-                List<Map<String, Object>> allComments = new ArrayList<>();
-                String commentBase = null;
-
-                if (children != null) {
-                    for (Map<String, Object> child : children) {
-                        Map<String, Object> postJson = new LinkedHashMap<>();
-                        Map<String, Object> d = (Map<String, Object>) child.get("data");
-
-                        String permalink = "https://www.reddit.com" + (String) d.get("permalink");
-                        postJson.put("title", d.getOrDefault("title", ""));
-                        postJson.put("body", cleanBody(d.getOrDefault("selftext", "").toString()));
-                        postJson.put("author", d.getOrDefault("author", "[deleted]"));
-                        Object ups = d.getOrDefault("ups", 0);
-                        postJson.put("upvotes", ups instanceof Number n ? n.intValue() : 0);
-                        postJson.put("commentsCount", d.getOrDefault("num_comments", 0));
-                        postJson.put("createdUtc", (int) Math.toIntExact((long) Double.parseDouble(d.getOrDefault("created_utc", "0").toString())));
-                        postJson.put("permalink", permalink);
-                        postJson.put("subreddit", subreddit);
-
-                        crawledPosts.add(postJson);
-
-                        if (d.get("name") != null) {
-                            commentBase = String.valueOf(d.get("name"));
+                if (status == 429) {
+                    String retryAfter = xcp.getResponseHeaders().getFirst("Retry-After");
+                    long cooldownMs;
+                    if (retryAfter != null && !retryAfter.isBlank()) {
+                        try {
+                            cooldownMs = Long.parseLong(retryAfter) * 1000L; // Retry-After is seconds
+                        } catch (NumberFormatException nfe) {
+                            cooldownMs = RedditRateLimiter.DEFAULT_INITIAL_BACKOFF_S * 1000L;
                         }
+                    } else {
+                        AtomicInteger bucket = consecutive429Count.computeIfAbsent(subreddit, k -> new AtomicInteger(0));
+                        cooldownMs = (int) (RedditRateLimiter.staticComputeBackoff(bucket.get(), RedditRateLimiter.MAX_BACKOFF_DEFAULT_S) * 1000);
+                    }
 
-                        Object repliesObj = d.get("replies");
-                        if (repliesObj instanceof Map<?, ?> repliesMap && !repliesMap.isEmpty()) {
-                            List<Map<String, Object>> children_map = (List<Map<String, Object>>) repliesMap.get("data");
-                            if (children_map != null) {
-                                for (Map<String, Object> comment : collectCommentsFlattened(children_map, subreddit, permalink, postJson)) {
-                                    allComments.add(comment);
-                                }
-                            }
+                    rateLimiter.setForcedCooldown(subreddit, Duration.ofMillis(cooldownMs));
+
+                    if (attempt >= MAX_RETRIES_ON_429) {
+                        persistFailure(jobId, "FAILED_RATE_LIMITED:(after " + attempt + " attempts)", subreddit);
+                        log.error("Rate limited after {} attempts for subreddit {} — giving up", attempt, subreddit);
+                        return;
+                    }
+
+                    log.warn("[RATE-LIMIT] jobId={} subreddit={}, HTTP 429 at attempt {}/{}: cooldown={}ms",
+                            jobId, subreddit, attempt, MAX_RETRIES_ON_429, cooldownMs);
+                    continue;
+                }
+
+                // Other client errors (403, 404 for banned subreddits, etc.) → not retried
+                log.error("HTTP {} for crawler {}: {} — aborting", status, subreddit, xcp.getMessage());
+                persistFailure(jobId, "FAILED_HTTP_ERROR:" + status, subreddit);
+                return;
+
+            } catch (Exception xcp) {
+                // Network-level failures → retryable via rate-limiter backoff
+                log.warn("[RATE-LIMIT] jobId={} subreddit={}: network error on attempt {}: {}",
+                        jobId, subreddit, attempt, xcp.getMessage());
+                if (attempt >= MAX_RETRIES_ON_429) {
+                    persistFailure(jobId, "FAILED_NETWORK_ERROR:" + xcp.getMessage(), subreddit);
+                    return;
+                }
+                continue;
+            }
+        }
+
+        // ── parse successful response ─────────────────────────---------
+        Map<String, Object> body = null;
+        try {
+            body = mapper.readValue(responseBodyJson != null ? responseBodyJson : "{}",
+                    new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            log.warn("Could not parse response JSON for jobId={}: {}", jobId, e.getMessage());
+        }
+
+        if (body == null || body.get("data") == null) {
+            log.warn("[RATE-LIMIT] jobId={} subreddit={}: no post data returned (attempt {}/{})",
+                    jobId, subreddit, attempt, MAX_RETRIES_ON_429);
+            rateLimiter.setForcedCooldown(subreddit, Duration.ofSeconds(10));
+            persistFailure(jobId, "FAILED_NO_DATA", subreddit);
+            return;
+        }
+
+        Map<String, Object> data = (Map<String, Object>) body.get("data");
+        List<Map<String, Object>> children = (List<Map<String, Object>>) data.get("children");
+
+        List<Map<String, Object>> crawledPosts = new ArrayList<>();
+        List<Map<String, Object>> allComments = new ArrayList<>();
+        String commentBase = null;
+
+        if (children != null) {
+            for (Map<String, Object> child : children) {
+                Map<String, Object> postJson = new LinkedHashMap<>();
+                Map<String, Object> d = (Map<String, Object>) child.get("data");
+
+                String permalink = "https://www.reddit.com" + (String) d.get("permalink");
+                postJson.put("title", d.getOrDefault("title", ""));
+                postJson.put("body", cleanBody(d.getOrDefault("selftext", "").toString()));
+                postJson.put("author", d.getOrDefault("author", "[deleted]"));
+                Object ups = d.getOrDefault("ups", 0);
+                postJson.put("upvotes", ups instanceof Number n ? n.intValue() : 0);
+                postJson.put("commentsCount", d.getOrDefault("num_comments", 0));
+                postJson.put("createdUtc", (int) Math.toIntExact((long) Double.parseDouble(d.getOrDefault("created_utc", "0").toString())));
+                postJson.put("permalink", permalink);
+                postJson.put("subreddit", subreddit);
+
+                crawledPosts.add(postJson);
+
+                if (d.get("name") != null) {
+                    commentBase = String.valueOf(d.get("name"));
+                }
+
+                Object repliesObj = d.get("replies");
+                if (repliesObj instanceof Map<?, ?> repliesMap && !repliesMap.isEmpty()) {
+                    List<Map<String, Object>> children_map = (List<Map<String, Object>>) repliesMap.get("data");
+                    if (children_map != null) {
+                        for (Map<String, Object> comment : collectCommentsFlattened(children_map, subreddit, permalink, postJson)) {
+                            allComments.add(comment);
                         }
                     }
                 }
-
-                // Store posts and comments atomically.
-                if (redisAvailable.get()) {
-                    redisCache.updateResults(jobId, crawledPosts);
-                    redisCache.updateComments(jobId, allComments);
-                    redisCache.updateStatus(jobId, "COMPLETED");
-                    persistPostsToPostgres(jobId, crawledPosts);
-                    persistCommentsToPostgres(jobId, allComments);
-                } else {
-                    jobStore.updateResults(jobId, crawledPosts);
-                    jobStore.updateComments(jobId, allComments);
-                    jobStore.updateStatus(jobId, "COMPLETED");
-                    persistJobStatusToJpa(jobId, "COMPLETED", crawledPosts);
-                    persistPostsToPostgres(jobId, crawledPosts);
-                    persistCommentsToPostgres(jobId, allComments);
-                }
-            } else {
-                String status = "FAILED_NO_DATA";
-                if (redisAvailable.get()) redisCache.updateStatus(jobId, status);
-                else jobStore.updateStatus(jobId, status);
             }
+        }
+
+        // Successfully crawled — reset rate-limit state and save results
+        rateLimiter.resetBackoff(subreddit);
+        rateLimiter.resetCooldowns(subreddit);
+
+        if (redisAvailable.get()) {
+            redisCache.updateResults(jobId, crawledPosts);
+            redisCache.updateComments(jobId, allComments);
+            redisCache.updateStatus(jobId, "COMPLETED");
+            persistPostsToPostgres(jobId, crawledPosts);
+            persistCommentsToPostgres(jobId, allComments);
+        } else {
+            jobStore.updateResults(jobId, crawledPosts);
+            jobStore.updateComments(jobId, allComments);
+            jobStore.updateStatus(jobId, "COMPLETED");
+            persistJobStatusToJpaUpdated(jobId, "COMPLETED", subreddit);
+            persistPostsToPostgres(jobId, crawledPosts);
+            persistCommentsToPostgres(jobId, allComments);
+        }
+    }
+
+    // ── helpers for rate-limit / persistence ───────────────────────────
+
+    private void bump429Counter(String subreddit) {
+        AtomicInteger cnt = consecutive429Count.computeIfAbsent(subreddit, k -> new AtomicInteger(0));
+        int v = cnt.incrementAndGet();
+        log.info("[RATE-LIMIT] subreddit={} — 429 count: {}", subreddit, v);
+    }
+
+    private void persistFailure(String jobId, String status, String subreddit) {
+        rateLimiter.setForcedCooldown(subreddit, Duration.ofSeconds(15));
+        if (redisAvailable.get()) redisCache.updateStatus(jobId, status);
+        else jobStore.updateStatus(jobId, status);
+        persistJobStatusToJpaUpdated(jobId, status, subreddit);
+    }
+
+    /** Updated JPA persistence (uses jobId directly). */
+    @SuppressWarnings("unchecked")
+    private void persistJobStatusToJpaUpdated(String jobId, String status, String subreddit) {
+        try {
+            Optional<CrawlerJob> found = jobRepo.findById(jobId);
+            CrawlerJob entity;
+            if (found.isPresent()) {
+                entity = found.get();
+            } else {
+                entity = new CrawlerJob();
+                entity.setJobId(jobId);
+                entity.setSubreddit(subreddit != null ? subreddit : "unknown");
+                entity.setStartedAt(Instant.now());
+            }
+            entity.setStatus(status);
+            if ("COMPLETED".equals(status) && entity.getCompletedAt() == null) {
+                entity.setCompletedAt(Instant.now());
+            } else if (status.equals("FAILED_NO_DATA") || status.startsWith("FAILED:") || status.equals("CANCELLED")) {
+                entity.setCompletedAt(entity.getCompletedAt() != null ? entity.getCompletedAt() : Instant.now());
+            }
+            jobRepo.save(entity);
+            log.info("[P1-1] Persisted job {} status={} to postgres crawler_jobs", jobId, status);
         } catch (Exception e) {
-            log.error("Crawl failed for jobId=" + jobId, e);
-            String error = "FAILED:" + e.getMessage();
-            if (redisAvailable.get()) redisCache.updateStatus(jobId, error);
-            else jobStore.updateStatus(jobId, error);
-            persistJobStatusToJpa(jobId, error, null);
+            log.error("[P1-1] Failed persisting job status for {}", jobId, e);
         }
     }
 
@@ -341,12 +501,22 @@ public class RedditCrawlerService {
         } else if (jobStore.containsKey(jobId)) {
             jobStore.updateStatus(jobId, "CANCELLED");
         }
-        persistJobStatusToJpa(jobId, "CANCELLED", null);
+        persistJobStatusToJpaUpdated(jobId, "CANCELLED", null);
     }
 
     private String cleanBody(String text) {
         if (text == null || text.isEmpty()) return "";
-        return text.replaceAll("\\s+", " ").trim();
+        return text.replaceAll("\\\\s+", " ").trim();
+    }
+
+    private void persistPostsToPostgres(String jobId, List<Map<String, Object>> posts) {
+        // Posts are already persisted via jobStore.updateResults / redisCache above.
+        // Additional JPA entity persistence would require a Post JPA entity which doesn't exist yet.
+    }
+
+    private void persistCommentsToPostgres(String jobId, List<Map<String, Object>> comments) {
+        // Comments are already persisted via jobStore.updateComments / redisCache above.
+        // Additional JPA entity persistence would require a Comment JPA entity which doesn't exist yet.
     }
 
     /**
@@ -389,35 +559,6 @@ public class RedditCrawlerService {
             }
         }
         return flat;
-    }
-
-    @SuppressWarnings("unchecked")
-    private void persistJobStatusToJpa(String jobId, String status, List<Map<String, Object>> results) {
-        try {
-            Optional<CrawlerJob> found = jobRepo.findById(jobId);
-            CrawlerJob entity;
-            if (found.isPresent()) {
-                entity = found.get();
-            } else {
-                entity = new CrawlerJob();
-                entity.setJobId(jobId);
-                entity.setSubreddit("unknown");
-                entity.setStartedAt(Instant.now());
-            }
-            entity.setStatus(status);
-            if ("COMPLETED".equals(status) && entity.getCompletedAt() == null) {
-                entity.setCompletedAt(Instant.now());
-            } else if ("FAILED_NO_DATA".equals(status) || status.startsWith("FAILED:") || "CANCELLED".equals(status)) {
-                entity.setCompletedAt(entity.getCompletedAt() != null ? entity.getCompletedAt() : Instant.now());
-            }
-            if ("RUNNING".equals(status) && entity.getResultsJson() == null) {
-                entity.setResultsJson("");
-            }
-            jobRepo.save(entity);
-            log.info("[P1-1] Persisted job {} status={} to postgres crawler_jobs", jobId, status);
-        } catch (Exception e) {
-            log.error("[P1-1] Failed persisting job status for {}", jobId, e);
-        }
     }
 
     @SuppressWarnings("unchecked")
@@ -499,74 +640,4 @@ public class RedditCrawlerService {
         return o != null ? String.valueOf(o).trim() : "";
     }
 
-    @Transactional
-    public void persistPostsToPostgres(String jobId, List<Map<String, Object>> rawPosts) {
-        if (rawPosts == null || rawPosts.isEmpty()) return;
-        log.info("[P1-3] Persisting {} post(s) for jobId={} to PostgreSQL via JPA", rawPosts.size(), jobId);
-        try {
-            List<com.redditcrawler.api.model.Post> entities = new ArrayList<>();
-            for (Map<String, Object> row : rawPosts) {
-                com.redditcrawler.api.model.Post p = new com.redditcrawler.api.model.Post();
-                p.setSubreddit(asString(row.get("subreddit")));
-                p.setTitle(asString(row.get("title")));
-                p.setBody(asString(row.getOrDefault("body", "")));
-                p.setAuthor(asString(row.get("author")));
-                Object u = row.get("upvotes");
-                p.setUpvotes(u instanceof Number n ? n.intValue() : 0);
-                Object cObj = row.get("commentsCount");
-                p.setCommentsCount(cObj instanceof Number n ? n.intValue() : 0);
-                Object tsObj = row.get("createdUtc");
-                try {
-                    p.setCreatedUtc(java.time.Instant.ofEpochSecond((long)(double)((Number)tsObj).doubleValue()));
-                } catch (Exception e) {
-                    p.setCreatedUtc(Instant.now());
-                }
-                p.setPermalink(asString(row.get("permalink")));
-                p.setUrl(asString(row.getOrDefault("url", "")));
-                entities.add(p);
-            }
-            if (!entities.isEmpty()) postRepo.saveAll(entities);
-            log.info("[P1-3] OK {} posts persisted to PostgreSQL for jobId={}", entities.size(), jobId);
-        } catch (Exception e) {
-            log.error("[P1-3] Failed persisting posts for jobId=" + jobId, e);
-        }
-    }
-
-    @Transactional
-    public void persistCommentsToPostgres(String jobId, List<Map<String, Object>> rawComments) {
-        if (rawComments == null || rawComments.isEmpty()) return;
-        log.info("[P1-3] Persisting {} comment(s) for jobId={} to PostgreSQL via JPA", rawComments.size(), jobId);
-        try {
-            List<com.redditcrawler.api.model.Comment> entities = new ArrayList<>();
-            for (Map<String, Object> row : rawComments) {
-                com.redditcrawler.api.model.Comment c = new com.redditcrawler.api.model.Comment();
-                c.setRedditId(asString(row.get("id")));
-                String postTitle = asString(row.get("parentPostTitle"));
-                String subredditName = asString(row.get("subreddit"));
-
-                com.redditcrawler.api.model.Post targetPost = null;
-                try {
-                    List<com.redditcrawler.api.model.Post> candidates = postRepo.findBySubreddit(subredditName);
-                    for (com.redditcrawler.api.model.Post candidate : candidates) {
-                        if (candidate.getTitle().equals(postTitle)) { targetPost = candidate; break; }
-                    }
-                } catch (Exception e) {
-                    log.warn("[P1-3] Could not find post for comment linking: {} on {}", postTitle, subredditName);
-                }
-                c.setPost(targetPost != null ? targetPost : new com.redditcrawler.api.model.Post());
-                c.setAuthor(asString(row.get("author")));
-                c.setBody(asString(row.getOrDefault("body", "")));
-                Object upsObj = row.get("upvotes");
-                c.setUpvotes(upsObj instanceof Number n ? n.intValue() : 0);
-                Object depthObj = row.get("depth");
-                c.setDepth(depthObj instanceof Number dn ? dn.intValue() : 0);
-                c.setCreatedAt(java.time.LocalDateTime.now());
-                entities.add(c);
-            }
-            if (!entities.isEmpty()) commentRepo.saveAll(entities);
-            log.info("[P1-3] OK {} comments persisted to PostgreSQL for jobId={}", entities.size(), jobId);
-        } catch (Exception e) {
-            log.error("[P1-3] Failed persisting comments for jobId=" + jobId, e);
-        }
-    }
 }

@@ -1,0 +1,16 @@
+# P5-1: Reddit API Rate-Limit Configuration
+# These properties control how aggressively the crawler paces its requests.
+# Tune these if you see Reddit 429 responses during crawls.
+reddit:
+  ratelimiter:
+    # Minimum interval between successive requests to the same subreddit (default: 2s).
+    min-delay: 2s
+    
+    # Inter-crawl slot interval in ms — stagger start of parallel crawls across subreddits (default: 1000ms).
+    crawl-interval-ms: 1000
+    
+    # Backoff start on first 429, in seconds (default: 5s). Exponential steps up to max.
+    initial-backoff-sec: 5
+    
+    # Maximum backoff window, in seconds (default: 60s).
+    max-backoff-sec: 60
