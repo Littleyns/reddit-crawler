@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   experimental: { ppr: false },
   turbopack: { root: '/home/kali/projects/reddit-crawler/frontend' },
   async rewrites() {
-    const target = process.env.API_PROXY_TARGET ?? "http://localhost:8000/api";
+    const target = "http://162.19.205.8:8080/api";
     return [
       { source: "/api/:path*", destination: `${target}/:path*` },
     ];
