@@ -1,16 +1,28 @@
-# P5-1: Reddit API Rate-Limit Configuration
+# P5-1: Reddit API Rate-Limit & Crawl Spacing Configuration
 # These properties control how aggressively the crawler paces its requests.
-# Tune these if you see Reddit 429 responses during crawls.
+# Tune these if you see Reddit 429 responses during crawls or need to slow down for sensitive subreddits.
+
 reddit:
   ratelimiter:
     # Minimum interval between successive requests to the same subreddit (default: 2s).
     min-delay: 2s
     
-    # Inter-crawl slot interval in ms — stagger start of parallel crawls across subreddits (default: 1000ms).
-    crawl-interval-ms: 1000
+    # Inter-crawl slot interval in ms — stagger start of parallel crawls across subreddits (default: 60s).
+    crawl-interval-ms: 60000
     
     # Backoff start on first 429, in seconds (default: 5s). Exponential steps up to max.
     initial-backoff-sec: 5
     
     # Maximum backoff window, in seconds (default: 60s).
     max-backoff-sec: 60
+
+  # Per-subreddit crawl delay overrides (in milliseconds).
+  # If a subreddit is not listed here, the default-delay-millis above applies.
+  crawl-delays:
+    default-delay-millis: 60000
+    
+    # Example per-subreddit overrides — uncomment and adjust as needed:
+    # linux: 30000     # Linux subreddit: faster crawl (e.g., 30s between crawls)
+    # golang: 120000   # r/golang: slower crawl (e.g., 120s to be generous)
+    
+    # Default-safe fallback — if nothing above matches:

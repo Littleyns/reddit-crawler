@@ -194,12 +194,14 @@ public class RedditCrawlerService {
      */
     @SuppressWarnings("unchecked")
     private void doCrawlSync(String jobId, String subreddit, Map<String, Object> config) {
-        // ── P5-1: inter-crawl scheduler slot ─────────────────────────────
-        Duration crawlWait = rateLimiter.waitForNextCrawlSlot();
+        // ── P5-1: inter-crawl scheduler slot (per-subreddit delay) ─────────────
+        Duration crawlWait = rateLimiter.waitForNextCrawlSlot(subreddit);
         if (!crawlWait.isZero()) {
+            long usedDelay = rateLimiter.getDelayForSubreddit(subreddit);
             try {
-                log.info("[P5-1-SCHEDULER] Job {} subreddit={} — waiting {}ms before new crawl (rate-limiter pacing)",
-                        jobId, subreddit, crawlWait.toMillis());
+                log.info("[P5-1-SCHEDULER] Job {} subreddit={} — waiting {}ms before new crawl "
+                        + "(per-subreddit spacing: {}ms, rate-limiter pacing)",
+                        jobId, subreddit, crawlWait.toMillis(), usedDelay);
                 Thread.sleep(crawlWait.toMillis());
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();

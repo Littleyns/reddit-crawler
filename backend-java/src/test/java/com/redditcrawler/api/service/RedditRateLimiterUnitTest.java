@@ -1,5 +1,6 @@
 package com.redditcrawler.api.service;
 
+import com.redditcrawler.api.config.RedditCrawlDelayConfig;
 import com.redditcrawler.api.config.RedditRateLimitConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -20,7 +21,7 @@ class RedditRateLimiterUnitTest {
         config.setCrawlIntervalMs(500);
         config.setInitialBackoffSec(3);
         config.setMaxBackoffSec(30);
-        rateLimiter = new RedditRateLimiter(config);
+        rateLimiter = new RedditRateLimiter(config, null);
     }
 
     // ── Config defaults ────────────────────────────────────────────────
@@ -28,7 +29,7 @@ class RedditRateLimiterUnitTest {
     @Test
     @DisplayName("Defaults when config is null")
     void nullConfigUsesDefaults() {
-        RedditRateLimiter limiter = new RedditRateLimiter(null);
+        RedditRateLimiter limiter = new RedditRateLimiter(null, null);
         assertEquals(2, limiter.getMinDelay().getSeconds());
         assertEquals(1000, limiter.getCrawlIntervalMs());
         assertEquals(5, limiter.getInitialBackoffSec());
@@ -44,7 +45,7 @@ class RedditRateLimiterUnitTest {
         bad.setInitialBackoffSec(-1);
         bad.setMaxBackoffSec(0);
 
-        RedditRateLimiter limiter = new RedditRateLimiter(bad);
+        RedditRateLimiter limiter = new RedditRateLimiter(bad, null);
         assertEquals(2, limiter.getMinDelay().getSeconds());
         assertEquals(1000, limiter.getCrawlIntervalMs());
         assertEquals(5, limiter.getInitialBackoffSec());
@@ -56,14 +57,14 @@ class RedditRateLimiterUnitTest {
     @Test
     @DisplayName("First call for a subreddit returns ZERO wait")
     void firstCallReturnsZero() {
-        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig());
+        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig(), null);
         assertTrue(fresh.waitForReady("newsub").isZero());
     }
 
     @Test
     @DisplayName("Subsequent calls within delay window return non-zero wait")
     void enforceMinDelay() throws InterruptedException {
-        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig());
+        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig(), null);
         // Force a short min-delay so the test is fast
         fresh.setMinDelay(Duration.ofMillis(50));
 
@@ -80,7 +81,7 @@ class RedditRateLimiterUnitTest {
     @Test
     @DisplayName("recordRequest resets the interval timer")
     void recordRequestResetsTimer() throws InterruptedException {
-        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig());
+        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig(), null);
         fresh.setMinDelay(Duration.ofMillis(100));
 
         fresh.recordRequest("rs");
@@ -99,7 +100,7 @@ class RedditRateLimiterUnitTest {
     @Test
     @DisplayName("setForcedCooldown blocks requests until cooldown expires")
     void forcedCooldownBlocksUntilExpired() throws InterruptedException {
-        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig());
+        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig(), null);
         // Set a 50ms cooldown — quick to verify
         fresh.setForcedCooldown("blocked", Duration.ofMillis(50));
         
@@ -119,7 +120,7 @@ class RedditRateLimiterUnitTest {
     @Test
     @DisplayName("resetCooldowns removes the forced cooldown")
     void resetCooldownRemovesForcedDelay() {
-        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig());
+        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig(), null);
         fresh.setForcedCooldown("c", Duration.ofMillis(60000));
         assertFalse(fresh.waitForReady("c").isZero());
 
@@ -130,7 +131,7 @@ class RedditRateLimiterUnitTest {
     @Test
     @DisplayName("resetBackoff zeroes the consecutive-429 counter")
     void resetBackoffZerosCounter() {
-        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig());
+        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig(), null);
         // Use a zero-delay for quick check (won't block)
         fresh.setForcedCooldown("x", Duration.ofMillis(1));
         assertEquals(1, fresh.getConsecutive429Count("x"));
@@ -144,35 +145,35 @@ class RedditRateLimiterUnitTest {
     @Test
     @DisplayName("First call to waitForNextCrawlSlot returns ZERO")
     void firstCrawlSlotAvailable() {
-        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig());
-        assertTrue(fresh.waitForNextCrawlSlot().isZero());
+        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig(), null);
+        assertTrue(fresh.waitForNextCrawlSlot("test").isZero());
     }
 
     @Test
     @DisplayName("Subsequent calls within crawl-interval return non-zero wait")
     void serialisesConcurrentCrawls() throws InterruptedException {
-        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig());
+        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig(), null);
         // Short interval for speed
         RedditRateLimitConfig fastCfg = new RedditRateLimitConfig();
         fastCfg.setCrawlIntervalMs(50);
-        RedditRateLimiter fast = new RedditRateLimiter(fastCfg);
+        RedditRateLimiter fast = new RedditRateLimiter(fastCfg, null);
 
-        fast.waitForNextCrawlSlot();
-        Duration w = fast.waitForNextCrawlSlot();
+        fast.waitForNextCrawlSlot("test");
+        Duration w = fast.waitForNextCrawlSlot("test");
         assertFalse(w.isZero());
         assertTrue(w.toMillis() <= 100); // a bit of margin
 
         Thread.sleep(65);
-        assertTrue(fresh.waitForNextCrawlSlot().isZero());
+        assertTrue(fresh.waitForNextCrawlSlot("test").isZero());
     }
 
     @Test
     @DisplayName("waitForNextCrawlSlot advances global timestamp correctly")
     void slotAdvancesTimestamp() throws InterruptedException {
-        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig());
-        assertTrue(fresh.waitForNextCrawlSlot().isZero());
+        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig(), null);
+        assertTrue(fresh.waitForNextCrawlSlot("test").isZero());
 
-        Duration w2 = fresh.waitForNextCrawlSlot();
+        Duration w2 = fresh.waitForNextCrawlSlot("test");
         assertTrue(w2.toMillis() > 0);
     }
 
@@ -192,7 +193,7 @@ class RedditRateLimiterUnitTest {
     void backoffRespectsMax() {
         RedditRateLimitConfig smallConfig = new RedditRateLimitConfig();
         smallConfig.setMaxBackoffSec(5);
-        RedditRateLimiter smallLimiter = new RedditRateLimiter(smallConfig);
+        RedditRateLimiter smallLimiter = new RedditRateLimiter(smallConfig, null);
 
         // Indices 0-6 use BASE steps [5,10,...60] — these naturally exceed the cap
         long s0 = smallLimiter.computeBackoffSec(0);
@@ -246,7 +247,7 @@ class RedditRateLimiterUnitTest {
     @Test
     @DisplayName("Different subreddits are independent - only recorded one should have delay")
     void independentSubreddits() throws InterruptedException {
-        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig());
+        RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig(), null);
         fresh.setMinDelay(Duration.ofMillis(50));
 
         fresh.recordRequest("a");

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 
-const BACKEND_URL = process.env.BACKEND_API_URL || "http://162.19.205.8:8080/api"
+const BACKEND_URL = process.env.BACKEND_API_URL || "http://backend:8080/api"
 
 export async function GET(req: NextRequest) {
   try {
-    let url = new URL(`${BACKEND_URL}/data/subreddits`)
+    const url = new URL(`${BACKEND_URL}/analytics/snapshot`)
     
     for (const [key, value] of req.nextUrl.searchParams) {
       url.searchParams.set(key, value)
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     const data = await resp.json()
     return NextResponse.json(data)
   } catch (err: any) {
-    console.warn("[data/subreddits proxy] Error:", err.message)
+    console.warn("[analysis/snapshot proxy] Error:", err.message)
     return NextResponse.json({ error: "Backend unavailable" }, { status: 502 })
   }
 }

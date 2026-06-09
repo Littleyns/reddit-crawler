@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.redditcrawler.api.config.RedditCrawlDelayConfig;
 import com.redditcrawler.api.config.RedditRateLimitConfig;
 
 /**
@@ -51,27 +52,45 @@ public class RedditRateLimiter {
     // ── global inter-crawl scheduling (P5-1) ───────────────────────────
     private volatile long nextCrawlReadyAtMs = 0;
 
-    // ── injected config (final — immutable after construction) ──────────
+    // ── injected config (immutable after construction) ────────────────
     private final Duration minDelay;
+    /** Per-subreddit delay overrides (default 60s, configurable). */
+    private final RedditCrawlDelayConfig crawlDelayConfig;
     private final long crawlIntervalMs;
     private final int initialBackoffSec;
     private final int maxBackoffSec;
 
-    /** Configure via {@code reddit.ratelimiter.*} Spring properties. */
-    public RedditRateLimiter(RedditRateLimitConfig config) {
+    /** Configure via {@code reddit.ratelimiter.*} and {@code reddit.crawl-delays.*} Spring properties. */
+    public RedditRateLimiter(RedditRateLimitConfig config, RedditCrawlDelayConfig crawlDelayConfig) {
         Duration cfgMinDelay = (config != null) ? config.getMinDelay() : null;
         this.minDelay = (cfgMinDelay != null && !cfgMinDelay.isZero())
                 ? cfgMinDelay : DEFAULT_MIN_DELAY;
-        long ci = (config != null) ? config.getCrawlIntervalMs() : DEFAULT_CRAWL_INTERVAL_MS;
-        this.crawlIntervalMs = (ci > 0) ? ci : DEFAULT_CRAWL_INTERVAL_MS;
+
+        // Combine rate-limiter and crawl-delay configs into final crawlIntervalMs
+        if (crawlDelayConfig != null && crawlDelayConfig.getDefaultDelayMillis() > 0) {
+            this.crawlIntervalMs = crawlDelayConfig.getDefaultDelayMillis();
+        } else if (config != null && config.getCrawlIntervalMs() > 0) {
+            this.crawlIntervalMs = config.getCrawlIntervalMs();
+        } else {
+            this.crawlIntervalMs = DEFAULT_CRAWL_INTERVAL_MS;
+        }
+
         this.initialBackoffSec = (config != null && config.getInitialBackoffSec() > 0)
                 ? config.getInitialBackoffSec() : DEFAULT_INITIAL_BACKOFF_S;
         this.maxBackoffSec = (config != null && config.getMaxBackoffSec() > 0)
                 ? config.getMaxBackoffSec() : MAX_BACKOFF_DEFAULT_S;
+        this.crawlDelayConfig = crawlDelayConfig != null ? crawlDelayConfig : new RedditCrawlDelayConfig();
 
         log.info("[RATE-LIMIT-CONFIG] Applied config: minDelay={}ms, crawlInterval={}ms, "
                 + "initialBackoff={}s, maxBackoff={}s",
                 minDelay.toMillis(), crawlIntervalMs, initialBackoffSec, maxBackoffSec);
+        if (crawlDelayConfig != null) {
+            log.info("[P5-1-CRAWL-DISPLAY] Default crawl delay: {}ms, per-subreddit overrides: {}",
+                    crawlDelayConfig.getDefaultDelayMillis(),
+                    crawlDelayConfig.getDelays().isEmpty() ? "[]" : crawlDelayConfig.getDelays().keySet());
+        } else {
+            log.warn("[P5-1-CRAWL-DISPLAY] No RedditCrawlDelayConfig bean found — using default 60s");
+        }
     }
 
     // ── configuration overrides (runtime mutable fields) ───────────────
@@ -80,6 +99,14 @@ public class RedditRateLimiter {
     /** Return effective min delay (runtime override takes priority). */
     private Duration effectiveMinDelay() {
         return (runtimeMinDelay != null) ? runtimeMinDelay : minDelay;
+    }
+
+    /** Look up the per-subreddit crawl delay in ms, falling back to default. */
+    public long getDelayForSubreddit(String subreddit) {
+        if (crawlDelayConfig != null && !crawlDelayConfig.getDelays().isEmpty()) {
+            return crawlDelayConfig.getDelayForSubreddit(subreddit);
+        }
+        return crawlIntervalMs;
     }
 
     // ── rate-limit operations ──────────────────────────────────────────
@@ -243,24 +270,44 @@ public class RedditRateLimiter {
 
     // ── P5-1: inter-crawl scheduling ───────────────────────────────────
 
+
     /**
      * Called by a crawl worker BEFORE issuing any request for its subreddit.
      * Serialises the START of new crawls across all thread-pool workers so that
      * concurrent crawls for different subreddits never hammer Reddit simultaneously.
      *
-     * Returns how long to sleep before starting, or ZERO if a slot is available now.
+     * Per-subreddit delays are applied when configured via {@code reddit.crawl-delays}.
+     * Falls back to the config's default crawl-interval-ms (default: 60s).
+     *
+     * @param subreddit the subreddit being crawled (used for per-subreddit delay lookup)
+     * @return Duration to sleep before starting, or {@code ZERO} if a slot is available now.
      */
-    public Duration waitForNextCrawlSlot() {
+    public Duration waitForNextCrawlSlot(String subreddit) {
+        long delayMs = crawlDelayConfig.getDelayForSubreddit(subreddit);
         long now = System.currentTimeMillis();
+
+        log.info("[P5-1-SCHEDULER] Crawl spacing: using per-subreddit delay={}ms for '{}'",
+                delayMs, subreddit);
+
         synchronized (this) {
             if (now < nextCrawlReadyAtMs) {
-                return Duration.ofMillis(nextCrawlReadyAtMs - now);
+                long remaining = nextCrawlReadyAtMs - now;
+                // Respect the configured crawl spacing for this subreddit
+                long sleepTime = Math.min(remaining, delayMs);
+                log.info("[P5-1-SCHEDULER] Waiting {}ms before starting crawl for '{}' "
+                        + "(next subreddit crawl at {})",
+                        sleepTime, subreddit,
+                        java.time.Instant.now().plusMillis(delayMs).toString());
+                return Duration.ofMillis(sleepTime);
             }
-            // Claim the next slot — each caller advances the global timestamp
-            nextCrawlReadyAtMs = now + crawlIntervalMs;
+            // Claim the next slot — advance global window by the per-subreddit delay
+            nextCrawlReadyAtMs = now + delayMs;
         }
-        log.info("[RATE-LIMIT-SCHEDULER] Crawl slot claimed by {}: next available in {}ms",
-                Thread.currentThread().getName(), crawlIntervalMs);
+
+        log.info("[P5-1-SCHEDULER] Crawl slot claimed for subreddit='{}' "
+                + "(spacing={}ms, next available at {})",
+                subreddit, delayMs,
+                java.time.Instant.now().plusMillis(delayMs).toString());
         return Duration.ZERO;
     }
 }

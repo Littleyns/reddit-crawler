@@ -16,8 +16,8 @@ public class RedditRateLimitConfig {
     /** Minimum delay between requests to the same subreddit (default 2 s). */
     private Duration minDelay = Duration.ofSeconds(2);
 
-    /** Interval between start of different crawls (inter-crawl slot) in ms (default 1000 ms). */
-    private long crawlIntervalMs = 1000;
+    /** Interval between start of different crawls (inter-crawl slot) in ms (default: 60s). */
+    private long crawlIntervalMs = 60_000;
 
     /** Default initial backoff on 429, in seconds (default 5 s). */
     private int initialBackoffSec = 5;
