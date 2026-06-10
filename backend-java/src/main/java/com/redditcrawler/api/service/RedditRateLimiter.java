@@ -21,7 +21,8 @@ import com.redditcrawler.api.config.RedditRateLimitConfig;
  *    subreddit don't thunder.
  * 3. On receiving an HTTP 429 from Reddit, respect the Retry-After header (if present)
  *    and apply exponential backoff on subsequent attempts for that subreddit.
- * 4. Thread-safe — used by crawl workers across thread-pool threads.
+ * 4. Per-client-id tracking — each API key gets independent rate-limit state so keys
+ *    don't collide with each other's throttle windows.
  * P5-1: Global inter-crawl scheduler that spaces startup of parallel crawls across
  *       subreddits, preventing thundering-herd 429s when multiple crawls are
  *       submitted concurrently via @Async. Configurable via {@code reddit.ratelimiter.*}.
@@ -48,6 +49,16 @@ public class RedditRateLimiter {
 
     /** Per-subreddit consecutive 429 count — drives exponential backoff. */
     private final ConcurrentHashMap<String, AtomicInteger> consecutive429Count = new ConcurrentHashMap<>();
+
+    // ── per-client-id delay state (P5-1 criterion 4) ─────────────────────
+    /** Per-client + subreddit last-request timestamps. Each API key gets its own window. */
+    private final ConcurrentHashMap<String, Long> lastRequestAtMsPerClient = new ConcurrentHashMap<>();
+
+    /** Per-client + subreddit retry-after override (ms). A 429 only blocks the offending client. */
+    private final ConcurrentHashMap<String, Long> forcedDelayUntilMsPerClient = new ConcurrentHashMap<>();
+
+    /** Per-client + subreddit consecutive 429 count — drives per-key exponential backoff. */
+    private final ConcurrentHashMap<String, AtomicInteger> consecutive429CountPerClient = new ConcurrentHashMap<>();
 
     // ── global inter-crawl scheduling (P5-1) ───────────────────────────
     private volatile long nextCrawlReadyAtMs = 0;
@@ -208,6 +219,103 @@ public class RedditRateLimiter {
     /** Read current 429 count for a subreddit (for monitoring / reporting). */
     public int getConsecutive429Count(String subreddit) {
         AtomicInteger c = consecutive429Count.get(subreddit);
+        return c != null ? c.get() : 0;
+    }
+
+    // ── per-client-id helpers ───────────────────────────────────────────────
+
+    /** Build a composite key from clientId and subreddit for per-key tracking. */
+    private String clientSubKey(String clientId, String subreddit) {
+        return (clientId != null ? clientId : "default") + "::" + subreddit;
+    }
+
+    /** Determine wait using per-client-id rate-limit state. */
+    public Duration waitForReadyPerClient(String clientId, String subreddit) {
+        long now = System.currentTimeMillis();
+        String key = clientSubKey(clientId, subreddit);
+
+        // Forced cooldown for this specific client
+        Long forcedEnd = forcedDelayUntilMsPerClient.get(key);
+        if (forcedEnd != null && now < forcedEnd) {
+            long remaining = forcedEnd - now;
+            log.info("[RATE-LIMIT] key={}/sub={} — sleeping {}ms (per-client cooldown from prior 429)", clientId, subreddit, remaining);
+            return Duration.ofMillis(remaining);
+        }
+
+        // Exponential backoff bucket for this client
+        Long bucketEnd = forcedDelayUntilMsPerClient.computeIfPresent(key, (k, v) -> {
+            if (now < v) return v;
+            int idx = consecutive429CountPerClient.getOrDefault(subreddit + "::" + clientId, new AtomicInteger(0)).get();
+            long backoffSec = computeBackoffSec(idx);
+            return now + backoffSec * 1000L;
+        });
+
+        if (bucketEnd != null && now < bucketEnd) {
+            long remaining = bucketEnd - now;
+            log.info("[RATE-LIMIT] key={}/sub={} — sleeping {}ms (per-client exponential backoff)", clientId, subreddit, remaining);
+            return Duration.ofMillis(remaining);
+        }
+
+        // Per-client minimum-interval
+        Long last = lastRequestAtMsPerClient.get(key);
+        if (last != null) {
+            long elapsed = now - last;
+            long wait = effectiveMinDelay().toMillis() - elapsed;
+            if (wait > 0) {
+                log.info("[RATE-LIMIT] key={}/sub={} — sleeping {}ms (per-client inter-request minimum)", clientId, subreddit, wait);
+                return Duration.ofMillis(wait);
+            }
+        }
+
+        return Duration.ZERO;
+    }
+
+    /** Record request for a specific client ID. Use `null` to mean "use shared state". */
+    public void recordRequestPerClient(String clientId, String subreddit) {
+        if (clientId == null) {
+            // Backwards-compatible: delegate to shared state
+            lastRequestAtMs.put(subreddit, System.currentTimeMillis());
+            return;
+        }
+        lastRequestAtMsPerClient.put(clientSubKey(clientId, subreddit), System.currentTimeMillis());
+    }
+
+    /** Apply forced cooldown for a specific client + subreddit combo. */
+    public synchronized void setForcedCooldownPerClient(String clientId, String subreddit, Duration delay) {
+        String key = clientSubKey(clientId, subreddit);
+        long until = System.currentTimeMillis() + delay.toMillis();
+        forcedDelayUntilMsPerClient.put(key, until);
+
+        AtomicInteger counter = consecutive429CountPerClient.computeIfAbsent(subreddit + "::" + clientId, k -> new AtomicInteger(0));
+        int bucket = counter.getAndUpdate(i -> Math.min(i + 1, 8));
+        if (bucket < 8) {
+            log.info("[RATE-LIMIT] key={}/sub={} — per-client 429 count bumped to {}", clientId, subreddit, bucket + 1);
+        }
+        log.info("[RATE-LIMIT] key={}/sub={} — setting per-client cooldown for {}ms", clientId, subreddit, delay.toMillis());
+    }
+
+    /** Reset backoff (consecutive-429 counter) for a specific client. */
+    public void resetBackoffPerClient(String clientId, String subreddit) {
+        AtomicInteger counter = consecutive429CountPerClient.get(subreddit + "::" + clientId);
+        if (counter != null && counter.get() > 0) {
+            log.info("[RATE-LIMIT] key={}/sub={} — resetting per-client 429 counter", clientId, subreddit);
+            counter.set(0);
+        }
+    }
+
+    /** Reset forced cooldowns for a specific client + subreddit. */
+    public void resetCooldownsPerClient(String clientId, String subreddit) {
+        if (clientId == null) {
+            // Clear all shared-state cooldowns as fallback
+            this.forcedDelayUntilMs.clear();
+            return;
+        }
+        forcedDelayUntilMsPerClient.remove(clientSubKey(clientId, subreddit));
+    }
+
+    /** Read current 429 count for a specific client + subreddit. */
+    public int getConsecutive429CountPerClient(String clientId, String subreddit) {
+        AtomicInteger c = consecutive429CountPerClient.get(subreddit + "::" + clientId);
         return c != null ? c.get() : 0;
     }
 

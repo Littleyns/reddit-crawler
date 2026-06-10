@@ -71,15 +71,69 @@ export interface UserSummary {
   role: "admin" | "analyst" | "viewer";
 }
 
-export interface SettingsPayload {
+export interface LlmSettings {
+  provider: string;
+  model: string;
   apiKey: string;
+}
+
+export interface ProxySettings {
+  enabled: boolean;
+  host: string;
+  port: number;
+  authUsername: string;
+  authPassword: string;
+}
+
+export interface CrawlerDefaults {
   defaultSubreddit: string;
-  defaultDepth: number;
-  defaultLimit: number;
-  autoExport: boolean;
-  exportFormat: "csv" | "json";
-  sessionTimeoutMinutes: number;
-  users: UserSummary[];
+}
+
+export interface SettingsPayload {
+  // LLM / AI settings (namespaced in backend as llm.*)
+  llmSettings: LlmSettings;
+  // Proxy settings (namespaced in backend as proxy.*)
+  proxySettings: ProxySettings;
+  // Crawler defaults (namespaced in backend as crawler.*)
+  crawlerDefaults: CrawlerDefaults;
+}
+
+/** Convert flat SettingsPayload to keyed KV pairs matching backend defaults */
+export function settingsToKVPayload(s: SettingsPayload): Record<string, unknown> {
+  const { llmSettings, proxySettings, crawlerDefaults } = s;
+  return {
+    "llm.provider": llmSettings.provider,
+    "llm.model": llmSettings.model,
+    "llm.apiKey": llmSettings.apiKey,
+    "proxy.enabled": proxySettings.enabled,
+    "proxy.host": proxySettings.host,
+    "proxy.port": String(proxySettings.port),
+    "proxy.authUsername": proxySettings.authUsername,
+    "proxy.authPassword": proxySettings.authPassword,
+    "crawler.defaultSubreddit": crawlerDefaults.defaultSubreddit,
+  };
+}
+
+/** Convert backend KV response to flat SettingsPayload */
+export function kvToSettings(kv: Record<string, unknown>): SettingsPayload {
+  const parseBool = (k: string) => String(kv[k] ?? "").toLowerCase() === "true";
+  return {
+    llmSettings: {
+      provider: String(kv["llm.provider"] ?? "ollama"),
+      model: String(kv["llm.model"] ?? ""),
+      apiKey: String(kv["llm.apiKey"] ?? ""),
+    },
+    proxySettings: {
+      enabled: parseBool("proxy.enabled"),
+      host: String(kv["proxy.host"] ?? ""),
+      port: Number(kv["proxy.port"]) || 8080,
+      authUsername: String(kv["proxy.authUsername"] ?? ""),
+      authPassword: String(kv["proxy.authPassword"] ?? ""),
+    },
+    crawlerDefaults: {
+      defaultSubreddit: String(kv["crawler.defaultSubreddit"] ?? "machinelearning"),
+    },
+  };
 }
 
 export interface LoginPayload {

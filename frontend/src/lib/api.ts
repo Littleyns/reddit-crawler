@@ -1,5 +1,6 @@
 import axios from "axios";
 import { filterBySearch } from "@/lib/utils";
+import { settingsToKVPayload } from "@/lib/types";
 import type {
   ApiErrorShape,
   CrawlConfig,
@@ -89,16 +90,18 @@ export async function fetchComments(query: DataQuery): Promise<PaginatedResponse
   return res.data;
 }
 
-// Settings — uses real backend /settings endpoint. No mock.
-export async function fetchSettings(): Promise<SettingsPayload> {
-  const res = await api.get<SettingsPayload>("/settings");
+// Settings — uses real backend /settings endpoint (returns keyed KV map)
+export async function fetchSettings(): Promise<Record<string, unknown>> {
+  const res = await api.get<Record<string, unknown>>("/settings");
   return res.data;
 }
 
 export async function updateSettings(payload: SettingsPayload): Promise<SettingsPayload> {
-  // POST to /settings — idempotent upsert. No mock.
-  const res = await api.post<SettingsPayload>("/settings", payload);
-  return res.data;
+  // POST to /settings — flatten nested SettingsPayload into dotted KV keys
+  // that match backend defaults (llm.provider, proxy.enabled, crawler.defaultSubreddit, etc.)
+  const flat = settingsToKVPayload(payload);
+  const res = await api.post<Record<string, unknown>>("/settings", flat);
+  return (res.data || payload) as unknown as SettingsPayload;
 }
 
 // Login — uses real backend /auth/login endpoint. No mock.

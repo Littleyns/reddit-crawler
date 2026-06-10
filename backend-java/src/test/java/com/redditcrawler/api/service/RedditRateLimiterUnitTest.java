@@ -7,6 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RedditRateLimiterUnitTest {
@@ -153,18 +154,18 @@ class RedditRateLimiterUnitTest {
     @DisplayName("Subsequent calls within crawl-interval return non-zero wait")
     void serialisesConcurrentCrawls() throws InterruptedException {
         RedditRateLimiter fresh = new RedditRateLimiter(new RedditRateLimitConfig(), null);
-        // Short interval for speed
-        RedditRateLimitConfig fastCfg = new RedditRateLimitConfig();
-        fastCfg.setCrawlIntervalMs(50);
-        RedditRateLimiter fast = new RedditRateLimiter(fastCfg, null);
+        // Short interval for speed — use crawl-delay to set quick spacing
+        RedditCrawlDelayConfig fastDelays = new RedditCrawlDelayConfig();
+        fastDelays.setDelays(Map.of("test", 50L));  // 50ms per-subreddit override
+        RedditRateLimiter fast = new RedditRateLimiter(new RedditRateLimitConfig(), fastDelays);
 
         fast.waitForNextCrawlSlot("test");
         Duration w = fast.waitForNextCrawlSlot("test");
         assertFalse(w.isZero());
-        assertTrue(w.toMillis() <= 100); // a bit of margin
+        assertTrue(w.toMillis() > 0 && w.toMillis() <= 100); // should be close to 50ms + margin
 
         Thread.sleep(65);
-        assertTrue(fresh.waitForNextCrawlSlot("test").isZero());
+        assertTrue(fast.waitForNextCrawlSlot("test").isZero());
     }
 
     @Test

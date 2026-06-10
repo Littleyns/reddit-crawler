@@ -194,6 +194,12 @@ public class RedditCrawlerService {
      */
     @SuppressWarnings("unchecked")
     private void doCrawlSync(String jobId, String subreddit, Map<String, Object> config) {
+        // ── Extract per-client-id from config (apiKeyAlias set by AsyncCrawlerRunner P4-1) ──
+        String clientId = null;
+        if (config != null && config.get("apiKeyAlias") != null) {
+            clientId = config.get("apiKeyAlias").toString();
+        }
+
         // ── P5-1: inter-crawl scheduler slot (per-subreddit delay) ─────────────
         Duration crawlWait = rateLimiter.waitForNextCrawlSlot(subreddit);
         if (!crawlWait.isZero()) {
@@ -241,8 +247,8 @@ public class RedditCrawlerService {
                     "rateLimiter active={}, backoffBucket={}",
                     jobId, subreddit, attempt, MAX_RETRIES_ON_429,
                     rateLimiter.getMinDelay(),
-                    consecutive429Count.getOrDefault(subreddit, new AtomicInteger(0)).get());
-            Duration waitBefore = rateLimiter.waitForReady(subreddit);
+                    (clientId != null) ? rateLimiter.getConsecutive429CountPerClient(clientId, subreddit) : consecutive429Count.getOrDefault(subreddit, new AtomicInteger(0)).get());
+            Duration waitBefore = (clientId != null) ? rateLimiter.waitForReadyPerClient(clientId, subreddit) : rateLimiter.waitForReady(subreddit);
             if (!waitBefore.isZero()) {
                 try { Thread.sleep(waitBefore.toMillis()); } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
@@ -252,7 +258,7 @@ public class RedditCrawlerService {
                 log.info("[RATE-LIMIT] jobId={} subreddit={} — waited {}ms before request (attempt {})",
                         jobId, subreddit, waitBefore.toMillis(), attempt);
             }
-            rateLimiter.recordRequest(subreddit);
+            rateLimiter.recordRequestPerClient(clientId, subreddit);
 
             try {
                 ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.GET, entity, Map.class);
@@ -274,6 +280,11 @@ public class RedditCrawlerService {
                 }
 
                 if (status == 429) {
+                    // Per-client exponential backoff for this specific key
+                    int clientBackoffIdx = (clientId != null)
+                            ? rateLimiter.getConsecutive429CountPerClient(clientId, subreddit)
+                            : consecutive429Count.getOrDefault(subreddit, new AtomicInteger(0)).get();
+
                     String retryAfter = xcp.getResponseHeaders().getFirst("Retry-After");
                     long cooldownMs;
                     if (retryAfter != null && !retryAfter.isBlank()) {
@@ -283,11 +294,14 @@ public class RedditCrawlerService {
                             cooldownMs = RedditRateLimiter.DEFAULT_INITIAL_BACKOFF_S * 1000L;
                         }
                     } else {
-                        AtomicInteger bucket = consecutive429Count.computeIfAbsent(subreddit, k -> new AtomicInteger(0));
-                        cooldownMs = (int) (RedditRateLimiter.staticComputeBackoff(bucket.get(), RedditRateLimiter.MAX_BACKOFF_DEFAULT_S) * 1000);
+                        cooldownMs = (int) (RedditRateLimiter.staticComputeBackoff(clientBackoffIdx, RedditRateLimiter.MAX_BACKOFF_DEFAULT_S) * 1000);
                     }
 
-                    rateLimiter.setForcedCooldown(subreddit, Duration.ofMillis(cooldownMs));
+                    if (clientId != null) {
+                        rateLimiter.setForcedCooldownPerClient(clientId, subreddit, Duration.ofMillis(cooldownMs));
+                    } else {
+                        rateLimiter.setForcedCooldown(subreddit, Duration.ofMillis(cooldownMs));
+                    }
 
                     if (attempt >= MAX_RETRIES_ON_429) {
                         persistFailure(jobId, "FAILED_RATE_LIMITED:(after " + attempt + " attempts)", subreddit);
@@ -376,8 +390,13 @@ public class RedditCrawlerService {
         }
 
         // Successfully crawled — reset rate-limit state and save results
-        rateLimiter.resetBackoff(subreddit);
-        rateLimiter.resetCooldowns(subreddit);
+        if (clientId != null) {
+            rateLimiter.resetBackoffPerClient(clientId, subreddit);
+            rateLimiter.resetCooldownsPerClient(clientId, subreddit);
+        } else {
+            rateLimiter.resetBackoff(subreddit);
+            rateLimiter.resetCooldowns(subreddit);
+        }
 
         if (redisAvailable.get()) {
             redisCache.updateResults(jobId, crawledPosts);
